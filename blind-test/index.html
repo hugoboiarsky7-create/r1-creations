@@ -21,11 +21,11 @@ html, body {
 .hdr .c { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.45); }
 
 /* Menu */
-.pl-row { margin: 3px 10px; padding: 9px 10px; border-radius: 7px; background: rgba(255,255,255,0.05); display: flex; align-items: baseline; gap: 6px; }
+.pl-row { margin: 2px 10px; padding: 5px 10px; border-radius: 7px; background: rgba(255,255,255,0.05); display: flex; align-items: baseline; gap: 6px; }
 .pl-row.sel { background: rgba(251,191,36,0.12); outline: 1px solid rgba(251,191,36,0.5); }
-.pl-row .n { font-size: 13px; font-weight: 800; }
-.pl-row .d { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.45); font-variant-numeric: tabular-nums; }
-#duel-toggle { margin: 6px 10px 3px 10px; padding: 8px 10px; border-radius: 7px; background: rgba(255,255,255,0.05); font-size: 12px; font-weight: 800; text-align: center; }
+.pl-row .n { font-size: 12px; font-weight: 800; }
+.pl-row .d { margin-left: auto; font-size: 9px; color: rgba(255,255,255,0.45); font-variant-numeric: tabular-nums; }
+#duel-toggle { margin: 4px 10px 2px 10px; padding: 6px 10px; border-radius: 7px; background: rgba(255,255,255,0.05); font-size: 11px; font-weight: 800; text-align: center; }
 #duel-toggle.on { background: rgba(244,114,182,0.18); color: #F472B6; }
 .hint { flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center; padding: 3px 6px 5px 6px; border-top: 1px solid rgba(255,255,255,0.08); margin-top: auto; }
 
@@ -115,9 +115,45 @@ var PL_RECENT = [
 ["Travis Scott","FE!N"],["Metro Boomin","Creepin'"],["Lil Baby","California Breeze"],["Burna Boy","Last Last"],
 ["Tyler, The Creator","EARFQUAKE"],["Kendrick Lamar","Not Like Us"]];
 
+var PL_80S = [
+["Michael Jackson","Billie Jean"],["a-ha","Take On Me"],["Toto","Africa"],["Queen","Under Pressure"],
+["Eurythmics","Sweet Dreams (Are Made of This)"],["Madonna","Like a Prayer"],["Prince","Kiss"],
+["Whitney Houston","I Wanna Dance with Somebody"],["Cyndi Lauper","Girls Just Want to Have Fun"],
+["The Police","Every Breath You Take"],["Dire Straits","Money for Nothing"],["Bon Jovi","Livin' on a Prayer"],
+["Guns N' Roses","Sweet Child O' Mine"],["AC/DC","Back In Black"],["Journey","Don't Stop Believin'"],
+["Tears for Fears","Everybody Wants to Rule the World"],["Depeche Mode","Just Can't Get Enough"],
+["New Order","Blue Monday"],["Rick Astley","Never Gonna Give You Up"],["Wham!","Wake Me Up Before You Go-Go"],
+["George Michael","Careless Whisper"],["Survivor","Eye of the Tiger"],["Soft Cell","Tainted Love"],
+["Jean-Jacques Goldman","Quand la musique est bonne"],["Daniel Balavoine","L'Aziza"],["Indochine","L'Aventurier"],
+["Téléphone","Un autre monde"],["France Gall","Ella, elle l'a"],["Desireless","Voyage voyage"],
+["Marc Lavoine","Elle a les yeux revolver"]];
+var PL_90S = [
+["Nirvana","Smells Like Teen Spirit"],["Oasis","Wonderwall"],["Backstreet Boys","I Want It That Way"],
+["Spice Girls","Wannabe"],["TLC","No Scrubs"],["Ace of Base","All That She Wants"],["Haddaway","What Is Love"],
+["Corona","The Rhythm of the Night"],["2 Unlimited","No Limit"],["The Cranberries","Zombie"],
+["R.E.M.","Losing My Religion"],["Radiohead","Creep"],["Britney Spears","Baby One More Time"],
+["Ricky Martin","Livin' la Vida Loca"],["Céline Dion","My Heart Will Go On"],["MC Hammer","U Can't Touch This"],
+["Vanilla Ice","Ice Ice Baby"],["Snap!","Rhythm Is a Dancer"],["Dr. Alban","It's My Life"],
+["IAM","Je danse le mia"],["MC Solaar","Bouge de là"],["Suprême NTM","That's My People"],
+["Alliance Ethnik","Respire"],["Larusso","Tu m'oublieras"],["Manau","La tribu de Dana"],
+["Khaled","Aïcha"],["Zebda","Tomber la chemise"],["Whitney Houston","I Will Always Love You"],
+["Seal","Kiss From A Rose"],["House Of Pain","Jump Around"]];
+var PL_2000S = [
+["Eminem","Without Me"],["OutKast","Hey Ya!"],["Coldplay","Viva La Vida"],["Britney Spears","Toxic"],
+["Beyoncé","Crazy In Love"],["Rihanna","Umbrella"],["Usher","Yeah!"],["Justin Timberlake","SexyBack"],
+["Black Eyed Peas","Where Is The Love?"],["Shakira","Hips Don't Lie"],["Gnarls Barkley","Crazy"],
+["Amy Winehouse","Rehab"],["The Killers","Mr. Brightside"],["Linkin Park","In The End"],
+["Red Hot Chili Peppers","By The Way"],["Daft Punk","One More Time"],["MGMT","Kids"],["Nelly","Dilemma"],
+["Sean Paul","Get Busy"],["Akon","Lonely"],["Diam's","La Boulette"],["K.Maro","Femme Like U"],
+["Tragédie","Hey Oh"],["Magic System","Premier Gaou"],["Yannick","Ces soirées-là"],["Stromae","Alors on danse"],
+["Kyo","Le chemin"],["Calogero","Face à la mer"],["Yelle","A cause des garçons"],["M. Pokora","Elle me contrôle"]];
+
 var PLAYLISTS = [
+  { id: 'y80', name: 'Années 80', tracks: PL_80S },
+  { id: 'y90', name: 'Années 90', tracks: PL_90S },
+  { id: 'y2000', name: 'Années 2000', tracks: PL_2000S },
   { id: 'rapfr', name: 'Rap FR 2010s', tracks: PL_RAPFR },
-  { id: 'classics', name: 'Classiques US/UK', tracks: PL_CLASSICS },
+  { id: 'classics', name: 'Classiques rap US/UK', tracks: PL_CLASSICS },
   { id: 'recent', name: 'Sorties récentes', tracks: PL_RECENT }
 ];
 

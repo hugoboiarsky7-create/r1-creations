@@ -79,7 +79,7 @@ html, body {
     <span id="status">…</span>
   </div>
   <div id="list"></div>
-  <div id="hint">molette = régler · clic latéral = seuil/fenêtre/naviguer<br>tap = sélectionner · appui long = éditer la watchlist</div>
+  <div id="hint">clic latéral = seuil / fenêtre / sens (⇅▼▲) · molette = régler<br>tap = sélectionner · appui long = éditer la watchlist</div>
 
   <div id="alert">
     <div id="al-coin"></div>
@@ -112,12 +112,25 @@ function load(k, def) {
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
 // Watchlist par défaut : BTC (perps) + l'indice XYZ100 (dex xyz)
+// dir : 'both' (⇅), 'down' (▼ baisse seule), 'up' (▲ hausse seule)
 var cfg = load(LSK, {
+  v: 2,
   coins: [
-    { key: 'BTC',        thr: 1.5, win: 15 },   // seuil % / fenêtre min
-    { key: 'xyz:XYZ100', thr: 1.5, win: 15 }
+    { key: 'BTC',        thr: 5, win: 60, dir: 'down' },
+    { key: 'xyz:XYZ100', thr: 5, win: 60, dir: 'down' }
   ]
 });
+// migration depuis l'ancienne config (sans dir) : baisse de 5 % sur BTC + indices
+if (!cfg.v) {
+  cfg.coins.forEach(function(c) {
+    if (!c.dir) c.dir = 'both';
+    if (c.key === 'BTC' || c.key.indexOf('xyz:') === 0) {
+      c.thr = 5; c.win = 60; c.dir = 'down';
+    }
+  });
+  cfg.v = 2;
+  save(LSK, cfg);
+}
 
 var hist = {};        // key -> [{t, px}]
 var last = {};        // key -> dernier prix
@@ -180,11 +193,16 @@ function windowChange(c) {
 }
 
 /* ---------------- alerte ---------------- */
+function triggers(c, chg) {
+  if (c.dir === 'down') return chg <= -c.thr;
+  if (c.dir === 'up')   return chg >= c.thr;
+  return Math.abs(chg) >= c.thr;
+}
 function checkAlert(c) {
   var chg = windowChange(c);
   if (chg === null) return;
   if (Math.abs(chg) < c.thr * 0.8) alarmed[c.key] = false;   // réarmement
-  if (Math.abs(chg) >= c.thr && !alarmed[c.key]) {
+  if (triggers(c, chg) && !alarmed[c.key]) {
     alarmed[c.key] = true;
     fireAlert(c, chg);
   }
@@ -242,10 +260,12 @@ function render() {
     var cls = chg === null ? 'dim' : (chg >= 0 ? 'green' : 'red');
     var chgTxt = chg === null ? '· · ·' : (chg >= 0 ? '+' : '−') + Math.abs(chg).toFixed(2).replace('.', ',') + ' %';
     var isSel = i === sel;
-    var thrTxt = '±' + c.thr.toFixed(1).replace('.', ',') + ' %';
+    var dirSym = c.dir === 'down' ? '▼' : c.dir === 'up' ? '▲' : '⇅';
+    var thrTxt = dirSym + ' ' + c.thr.toFixed(1).replace('.', ',') + ' %';
     var winTxt = c.win + ' min';
     if (isSel && mode === 'thr') thrTxt = '<span class="edit">' + thrTxt + ' ◂▸</span>';
     if (isSel && mode === 'win') winTxt = '<span class="edit">' + winTxt + ' ◂▸</span>';
+    if (isSel && mode === 'dir') thrTxt = '<span class="edit">' + dirSym + '</span> ' + c.thr.toFixed(1).replace('.', ',') + ' %';
     html += '<div class="coin' + (isSel ? ' sel' : '') + '" data-i="' + i + '">' +
       '<div class="c1"><span class="cname">' + esc(c.key.replace('xyz:', '')) + '</span>' +
         '<span class="cpx">' + (px !== undefined ? fmtPx(px) : '–') + '</span></div>' +
@@ -267,23 +287,28 @@ function stepVal(steps, cur, dir) {
 }
 
 // Molette (mapping naturel R1 : scrollUp = diminuer/monter, scrollDown = augmenter/descendre)
+var DIRS = ['both', 'down', 'up'];
 function onWheel(dir) {
   if ($('wl-ov').classList.contains('visible') || $('alert').classList.contains('visible')) return;
   var c = cfg.coins[sel];
   if (!c) return;
   if (mode === 'thr') { c.thr = stepVal(THR_STEPS, c.thr, dir); save(LSK, cfg); alarmed[c.key] = false; }
   else if (mode === 'win') { c.win = stepVal(WIN_STEPS, c.win, dir); save(LSK, cfg); alarmed[c.key] = false; }
+  else if (mode === 'dir') {
+    var di = (DIRS.indexOf(c.dir || 'both') + dir + DIRS.length) % DIRS.length;
+    c.dir = DIRS[di]; save(LSK, cfg); alarmed[c.key] = false;
+  }
   else { sel = Math.min(cfg.coins.length - 1, Math.max(0, sel + dir)); }
   render();
 }
 window.addEventListener('scrollUp',   function() { onWheel(-1); });
 window.addEventListener('scrollDown', function() { onWheel(1); });
 
-// Clic latéral : cycle nav → seuil → fenêtre
+// Clic latéral : cycle nav → seuil → fenêtre → direction
 window.addEventListener('sideClick', function() {
   if ($('wl-ov').classList.contains('visible')) return;
   if ($('alert').classList.contains('visible')) { $('alert').className = ''; return; }
-  mode = mode === 'nav' ? 'thr' : (mode === 'thr' ? 'win' : 'nav');
+  mode = mode === 'nav' ? 'thr' : (mode === 'thr' ? 'win' : (mode === 'win' ? 'dir' : 'nav'));
   render();
 });
 
