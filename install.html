@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Installer HL Perps</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 32px;
+}
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+p { font-size: 14px; color: rgba(255,255,255,0.45); margin-bottom: 32px; text-align: center; }
+#qr { margin-bottom: 20px; }
+.url { font-size: 11px; color: rgba(255,255,255,0.25); word-break: break-all; text-align: center; max-width: 300px; }
+</style>
+</head>
+<body>
+<h1>HL Perps</h1>
+<p>Scanne avec ton Rabbit R1 pour installer.</p>
+<div id="qr"></div>
+<div class="url" id="url-label"></div>
+<script src="https://unpkg.com/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
+<script>
+  // ← remplace par TON URL GitHub Pages. Bump ?v=N à chaque mise à jour (cache busting).
+  var creationUrl = 'https://TON_USER.github.io/TON_REPO/hl-perps/?v=1';
+  document.getElementById('url-label').textContent = creationUrl;
+
+  var qrData = JSON.stringify({
+    title: "HL Perps",
+    url: creationUrl,
+    description: "Positions perp Hyperliquid en lecture seule",
+    iconUrl: "",
+    themeColor: "#4ADE80"
+  });
+
+  var qrCode = new QRCodeStyling({
+    width: 260, height: 260,
+    data: qrData,
+    dotsOptions: { color: "#ffffff", type: "rounded" },
+    backgroundOptions: { color: "#0e0e10" },
+    cornersSquareOptions: { color: "#4ADE80", type: "extra-rounded" },
+    cornersDotOptions: { color: "#4ADE80" }
+  });
+  qrCode.append(document.getElementById('qr'));
+</script>
+</body>
+</html>

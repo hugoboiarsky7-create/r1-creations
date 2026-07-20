@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>HL Perps</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; position: relative; }
+
+/* ---- Tabs ---- */
+#tabs {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px 4px 8px; flex: 0 0 auto;
+}
+.tab {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  color: rgba(255,255,255,0.35);
+  padding: 3px 8px; border-radius: 10px;
+}
+.tab.active { color: #0e0e10; background: #FE5000; }
+#counter { margin-left: auto; font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.45); }
+
+/* ---- Error banner ---- */
+#error {
+  display: none; flex: 0 0 auto;
+  margin: 0 8px 2px 8px; padding: 3px 6px;
+  background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.4);
+  border-radius: 5px; font-size: 10px; color: #f87171; text-align: center;
+}
+#error.visible { display: block; }
+
+/* ---- Content ---- */
+#content { flex: 1 1 auto; overflow: hidden; position: relative; }
+.view { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none; }
+.view.active { display: block; }
+
+/* ---- Position card ---- */
+#card { padding: 4px 10px 0 10px; height: 100%; display: flex; flex-direction: column; }
+#pos-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+#pos-coin { font-size: 22px; font-weight: 800; }
+.badge {
+  font-size: 11px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
+}
+.badge.long  { background: rgba(74,222,128,0.18); color: #4ade80; }
+.badge.short { background: rgba(248,113,113,0.18); color: #f87171; }
+#pos-lev { font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.45); }
+.row { display: flex; justify-content: space-between; align-items: baseline; padding: 2.5px 0; }
+.row .lbl { font-size: 11px; color: rgba(255,255,255,0.45); }
+.row .val { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#pos-pnl-wrap { margin-top: auto; padding: 4px 0 6px 0; text-align: center; }
+#pos-pnl  { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
+#pos-pnl-pct { font-size: 13px; font-weight: 700; margin-top: 1px; }
+.green { color: #4ade80; }
+.red   { color: #f87171; }
+.empty {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: rgba(255,255,255,0.35); text-align: center; padding: 0 20px;
+}
+
+/* ---- Orders list ---- */
+#ord-clip { height: 100%; overflow: hidden; }
+#ord-list { transition: transform 0.12s ease-out; }
+.ord {
+  height: 38px; overflow: hidden;
+  padding: 3px 10px 0 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.ord-l1 { display: flex; align-items: baseline; gap: 5px; }
+.ord-coin { font-size: 13px; font-weight: 800; }
+.ord-side { font-size: 10px; font-weight: 800; }
+.ord-type { margin-left: auto; font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.4); letter-spacing: 0.3px; }
+.ord-l2 { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: rgba(255,255,255,0.75); margin-top: 1px; }
+
+/* ---- Footer ---- */
+#footer {
+  flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 10px 5px 10px; border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 10px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="tabs">
+    <div class="tab active" id="tab-pos">POSITIONS</div>
+    <div class="tab" id="tab-ord">ORDRES</div>
+    <div id="counter"></div>
+  </div>
+  <div id="error"></div>
+  <div id="content">
+    <div class="view active" id="view-pos"></div>
+    <div class="view" id="view-ord"><div id="ord-clip"><div id="ord-list"></div></div></div>
+  </div>
+  <div id="footer"><span id="ft-acct">–</span><span id="ft-upd">–</span></div>
+</div>
+
+<script>
+'use strict';
+
+/* ================= CONFIG ================= */
+var ADDRESS = '0xTON_ADRESSE';   // ← remplace par ton adresse Hyperliquid (0x…)
+var REFRESH_MS = 20000;
+var API = 'https://api.hyperliquid.xyz/info';
+/* ========================================== */
+
+// Override pratique pour tester sur desktop : index.html?addr=0x...
+var qsAddr = new URLSearchParams(location.search).get('addr');
+if (qsAddr) ADDRESS = qsAddr;
+
+var state = {
+  tab: 'pos',          // 'pos' | 'ord'
+  positions: [],
+  orders: [],
+  mids: {},
+  acctValue: null,
+  marginUsed: null,
+  idx: 0,              // position affichée
+  ordOffset: 0,        // scroll ordres (en items)
+  lastOk: null,        // timestamp dernière màj réussie
+  error: null
+};
+
+var $ = function(id) { return document.getElementById(id); };
+
+/* ---------------- Formatage ---------------- */
+function fmtNum(n, dec) {
+  var s = n.toFixed(dec);
+  var parts = s.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return parts.join(',');
+}
+function fmtPx(x) {
+  var n = parseFloat(x);
+  if (!isFinite(n)) return '–';
+  var dec = n >= 1000 ? 1 : n >= 10 ? 2 : n >= 0.1 ? 4 : 6;
+  return fmtNum(n, dec);
+}
+function fmtUsd(n) {
+  var a = Math.abs(n);
+  if (a >= 1e6) return fmtNum(n / 1e6, 2) + ' M$';
+  if (a >= 1e4) return fmtNum(n / 1e3, 1) + ' k$';
+  return fmtNum(n, 2) + ' $';
+}
+function fmtSigned(n, suffix) {
+  return (n >= 0 ? '+' : '−') + fmtNum(Math.abs(n), 2) + suffix;
+}
+
+/* ---------------- Données ---------------- */
+function post(body) {
+  return fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+
+function refresh() {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(ADDRESS)) {
+    state.badAddr = true;
+    state.error = 'Adresse non configurée';
+    render();
+    return;
+  }
+  Promise.all([
+    post({ type: 'clearinghouseState', user: ADDRESS }),
+    post({ type: 'allMids' }),
+    post({ type: 'frontendOpenOrders', user: ADDRESS })
+  ]).then(function(res) {
+    var ch = res[0];
+    state.positions = (ch.assetPositions || []).map(function(ap) { return ap.position; });
+    state.mids = res[1] || {};
+    state.orders = res[2] || [];
+    state.acctValue = parseFloat(ch.marginSummary.accountValue);
+    state.marginUsed = parseFloat(ch.marginSummary.totalMarginUsed);
+    if (state.idx >= state.positions.length) state.idx = Math.max(0, state.positions.length - 1);
+    var maxOff = Math.max(0, state.orders.length - visibleOrderRows());
+    if (state.ordOffset > maxOff) state.ordOffset = maxOff;
+    state.lastOk = Date.now();
+    state.error = null;
+    render();
+  }).catch(function(e) {
+    state.error = 'Erreur réseau (' + (e.message || 'fetch') + ')';
+    render();
+  });
+}
+
+/* ---------------- Rendu ---------------- */
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function emptyMsg(noData) {
+  if (state.lastOk) return noData;
+  if (state.badAddr) return 'Remplace ADDRESS en haut de index.html par ton adresse 0x…';
+  return 'Chargement…';
+}
+
+function renderPosition() {
+  var v = $('view-pos');
+  if (!state.positions.length) {
+    v.innerHTML = '<div class="empty">' + emptyMsg('Aucune position ouverte') + '</div>';
+    $('counter').textContent = '';
+    return;
+  }
+  var p = state.positions[state.idx];
+  var szi = parseFloat(p.szi);
+  var isLong = szi > 0;
+  var entry = parseFloat(p.entryPx);
+  var mid = parseFloat(state.mids[p.coin]);
+  var pnl = parseFloat(p.unrealizedPnl);
+  var roe = parseFloat(p.returnOnEquity) * 100;
+  var cls = pnl >= 0 ? 'green' : 'red';
+  var liq = parseFloat(p.liquidationPx);
+
+  v.innerHTML =
+    '<div id="card">' +
+      '<div id="pos-head">' +
+        '<span id="pos-coin">' + esc(p.coin) + '</span>' +
+        '<span class="badge ' + (isLong ? 'long">LONG' : 'short">SHORT') + '</span>' +
+        '<span id="pos-lev">' + p.leverage.value + 'x ' + (p.leverage.type === 'cross' ? 'cross' : 'isol.') + '</span>' +
+      '</div>' +
+      '<div class="row"><span class="lbl">Taille</span><span class="val">' + fmtPx(Math.abs(szi)) + ' ' + esc(p.coin) + '</span></div>' +
+      '<div class="row"><span class="lbl">Entrée</span><span class="val">' + fmtPx(entry) + '</span></div>' +
+      '<div class="row"><span class="lbl">Prix</span><span class="val">' + (isFinite(mid) ? fmtPx(mid) : '–') + '</span></div>' +
+      '<div class="row"><span class="lbl">Liquidation</span><span class="val red">' + (isFinite(liq) ? fmtPx(liq) : '–') + '</span></div>' +
+      '<div id="pos-pnl-wrap">' +
+        '<div id="pos-pnl" class="' + cls + '">' + fmtSigned(pnl, ' $') + '</div>' +
+        '<div id="pos-pnl-pct" class="' + cls + '">' + fmtSigned(roe, ' %') + '</div>' +
+      '</div>' +
+    '</div>';
+  $('counter').textContent = (state.idx + 1) + '/' + state.positions.length;
+}
+
+function orderRowH() { return 38; }
+function visibleOrderRows() {
+  var clip = $('ord-clip');
+  return Math.max(1, Math.floor((clip.clientHeight || 220) / orderRowH()));
+}
+
+function renderOrders() {
+  var list = $('ord-list');
+  if (!state.orders.length) {
+    list.innerHTML = '<div class="empty" style="height:200px">' + emptyMsg('Aucun ordre ouvert') + '</div>';
+    $('counter').textContent = '';
+    list.style.transform = 'translateY(0)';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < state.orders.length; i++) {
+    var o = state.orders[i];
+    var buy = o.side === 'B';
+    var type = o.isTrigger ? esc(o.orderType).toUpperCase() : 'LIMIT';
+    var px = o.isTrigger && parseFloat(o.triggerPx) > 0 ? o.triggerPx : o.limitPx;
+    var sz = parseFloat(o.sz) > 0 ? o.sz : o.origSz;
+    html +=
+      '<div class="ord">' +
+        '<div class="ord-l1">' +
+          '<span class="ord-coin">' + esc(o.coin) + '</span>' +
+          '<span class="ord-side ' + (buy ? 'green">ACHAT' : 'red">VENTE') + '</span>' +
+          '<span class="ord-type">' + type + (o.reduceOnly ? ' · RO' : '') + '</span>' +
+        '</div>' +
+        '<div class="ord-l2"><span>@ ' + fmtPx(px) + '</span><span>' + fmtPx(parseFloat(sz)) + '</span></div>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+  list.style.transform = 'translateY(-' + (state.ordOffset * orderRowH()) + 'px)';
+  $('counter').textContent = state.orders.length + ' ordres';
+}
+
+function renderFooter() {
+  if (state.acctValue !== null) {
+    $('ft-acct').textContent = 'Cpte ' + fmtUsd(state.acctValue) + ' · marge ' + fmtUsd(state.marginUsed);
+  }
+  var upd = $('ft-upd');
+  if (state.lastOk) {
+    var s = Math.max(0, Math.round((Date.now() - state.lastOk) / 1000));
+    upd.textContent = 'màj il y a ' + s + ' s';
+  } else {
+    upd.textContent = '…';
+  }
+}
+
+function render() {
+  $('tab-pos').classList.toggle('active', state.tab === 'pos');
+  $('tab-ord').classList.toggle('active', state.tab === 'ord');
+  $('view-pos').classList.toggle('active', state.tab === 'pos');
+  $('view-ord').classList.toggle('active', state.tab === 'ord');
+  var err = $('error');
+  err.classList.toggle('visible', !!state.error);
+  err.textContent = state.error || '';
+  if (state.tab === 'pos') renderPosition(); else renderOrders();
+  renderFooter();
+}
+
+/* ---------------- Navigation ---------------- */
+function nextPos(d) {
+  if (state.positions.length < 2) return;
+  state.idx = (state.idx + d + state.positions.length) % state.positions.length;
+  renderPosition();
+}
+function scrollOrders(d) {
+  var maxOff = Math.max(0, state.orders.length - visibleOrderRows());
+  var o = Math.min(maxOff, Math.max(0, state.ordOffset + d));
+  if (o === state.ordOffset) return;
+  state.ordOffset = o;
+  $('ord-list').style.transform = 'translateY(-' + (o * orderRowH()) + 'px)';
+}
+function setTab(t) {
+  if (state.tab === t) return;
+  state.tab = t;
+  render();
+}
+
+// Molette R1 — mapping naturel (cf. CLAUDE.md du repo) :
+// scrollUp = précédent / remonter, scrollDown = suivant / descendre
+window.addEventListener('scrollUp', function() {
+  if (state.tab === 'pos') nextPos(-1); else scrollOrders(-1);
+});
+window.addEventListener('scrollDown', function() {
+  if (state.tab === 'pos') nextPos(1); else scrollOrders(1);
+});
+
+// Bouton latéral (PTT) : bascule POSITIONS / ORDRES
+window.addEventListener('sideClick', function() {
+  setTab(state.tab === 'pos' ? 'ord' : 'pos');
+});
+
+// Tactile : tap sur les onglets (pointerup, jamais de preventDefault — cf. tips)
+$('tab-pos').addEventListener('pointerup', function() { setTab('pos'); });
+$('tab-ord').addEventListener('pointerup', function() { setTab('ord'); });
+
+// Swipe gauche/droite sur la carte position
+(function() {
+  var x0 = null, y0 = null;
+  var v = $('view-pos');
+  v.addEventListener('pointerdown', function(e) { x0 = e.clientX; y0 = e.clientY; });
+  v.addEventListener('pointerup', function(e) {
+    if (x0 === null) return;
+    var dx = e.clientX - x0, dy = e.clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) {
+      nextPos(dx < 0 ? 1 : -1);   // swipe vers la gauche = position suivante
+    }
+  });
+  v.addEventListener('pointercancel', function() { x0 = null; });
+})();
+
+// Fallbacks clavier pour tester sur desktop
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape')     window.dispatchEvent(new Event('sideClick'));
+  if (e.key === 'ArrowUp')    window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown')  window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'ArrowLeft')  { if (state.tab === 'pos') nextPos(-1); }
+  if (e.key === 'ArrowRight') { if (state.tab === 'pos') nextPos(1); }
+});
+
+/* ---------------- Boucles ---------------- */
+refresh();
+setInterval(refresh, REFRESH_MS);
+setInterval(renderFooter, 1000);
+</script>
+</body>
+</html>
