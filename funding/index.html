@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Funding Radar</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; }
+
+#hdr {
+  flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px;
+  padding: 7px 10px 4px 10px;
+}
+#hdr .title { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #2DD4BF; }
+#count { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.4); }
+
+#error {
+  display: none; margin: 0 8px 3px 8px; padding: 3px 6px;
+  background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.4);
+  border-radius: 5px; font-size: 10px; color: #f87171; text-align: center;
+}
+#error.visible { display: block; }
+
+#clip { flex: 1 1 auto; overflow: hidden; }
+#list { transition: transform 0.1s ease-out; }
+
+.row {
+  height: 40px; overflow: hidden; padding: 4px 10px 0 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.l1 { display: flex; align-items: baseline; gap: 5px; }
+.coin { font-size: 13px; font-weight: 800; }
+.badge { font-size: 10px; }
+.apr { margin-left: auto; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.l2 {
+  display: flex; justify-content: space-between; font-size: 10px;
+  color: rgba(255,255,255,0.45); font-variant-numeric: tabular-nums; margin-top: 1px;
+}
+.green { color: #4ade80; }
+.red   { color: #f87171; }
+.empty {
+  height: 180px; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: rgba(255,255,255,0.35);
+}
+
+#footer {
+  flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 10px 5px 10px; border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 10px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hdr">
+    <span class="title">FUNDING RADAR</span>
+    <span id="count"></span>
+  </div>
+  <div id="error"></div>
+  <div id="clip"><div id="list"><div class="empty">Chargement…</div></div></div>
+  <div id="footer"><span>tri : |funding| · ⚡ = &gt;30 %/an</span><span id="upd">…</span></div>
+</div>
+
+<script>
+'use strict';
+var API = 'https://api.hyperliquid.xyz/info';
+var REFRESH_MS = 30000;
+var ROW = 40;
+
+var rows = [];        // {coin, funding, apr, markPx, oiUsd}
+var lastOk = null;
+var error = null;
+var off = 0;          // scroll en items
+
+var $ = function(id) { return document.getElementById(id); };
+
+function fmtNum(n, dec) {
+  var s = n.toFixed(dec);
+  var p = s.split('.');
+  p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return p.join(',');
+}
+function fmtPx(x) {
+  if (!isFinite(x)) return '–';
+  var dec = x >= 1000 ? 1 : x >= 10 ? 2 : x >= 0.1 ? 4 : 6;
+  return fmtNum(x, dec);
+}
+function fmtUsd(n) {
+  var a = Math.abs(n);
+  if (a >= 1e9) return fmtNum(n / 1e9, 1) + ' G$';
+  if (a >= 1e6) return fmtNum(n / 1e6, 1) + ' M$';
+  if (a >= 1e3) return fmtNum(n / 1e3, 0) + ' k$';
+  return fmtNum(n, 0) + ' $';
+}
+
+function refresh() {
+  fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'metaAndAssetCtxs' })
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function(d) {
+    var universe = d[0].universe, ctxs = d[1];
+    var out = [];
+    for (var i = 0; i < universe.length && i < ctxs.length; i++) {
+      var u = universe[i], c = ctxs[i];
+      if (u.isDelisted) continue;
+      var mark = parseFloat(c.markPx);
+      var f = parseFloat(c.funding);
+      var oi = parseFloat(c.openInterest);
+      var vlm = parseFloat(c.dayNtlVlm);
+      if (!isFinite(mark) || mark <= 0 || !isFinite(f)) continue;
+      if (!isFinite(vlm) || vlm < 10000) continue;   // ignore les marchés morts
+      out.push({
+        coin: u.name,
+        funding: f,                       // taux horaire (décimal)
+        apr: f * 24 * 365 * 100,          // annualisé en %
+        markPx: mark,
+        oiUsd: (isFinite(oi) ? oi : 0) * mark
+      });
+    }
+    out.sort(function(a, b) { return Math.abs(b.funding) - Math.abs(a.funding); });
+    rows = out;
+    lastOk = Date.now();
+    error = null;
+    render();
+  }).catch(function(e) {
+    error = 'Erreur réseau (' + (e.message || 'fetch') + ')';
+    render();
+  });
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+function render() {
+  var err = $('error');
+  err.classList.toggle('visible', !!error);
+  err.textContent = error || '';
+  $('count').textContent = rows.length ? rows.length + ' marchés' : '';
+
+  var list = $('list');
+  if (!rows.length) {
+    list.innerHTML = '<div class="empty">' + (lastOk ? 'Aucun marché' : 'Chargement…') + '</div>';
+    renderUpd();
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var cls = r.funding >= 0 ? 'green' : 'red';
+    var hot = Math.abs(r.apr) > 30;
+    html += '<div class="row">' +
+      '<div class="l1">' +
+        '<span class="coin">' + esc(r.coin) + '</span>' +
+        (hot ? '<span class="badge">⚡</span>' : '') +
+        '<span class="apr ' + cls + '">' + (r.apr >= 0 ? '+' : '−') + fmtNum(Math.abs(r.apr), 1) + ' %/an</span>' +
+      '</div>' +
+      '<div class="l2">' +
+        '<span class="' + cls + '">' + (r.funding >= 0 ? '+' : '−') + fmtNum(Math.abs(r.funding) * 100, 4) + ' %/h</span>' +
+        '<span>' + fmtPx(r.markPx) + '</span>' +
+        '<span>OI ' + fmtUsd(r.oiUsd) + '</span>' +
+      '</div>' +
+    '</div>';
+  }
+  list.innerHTML = html;
+  clampScroll();
+  renderUpd();
+}
+
+function renderUpd() {
+  var upd = $('upd');
+  if (lastOk) {
+    upd.textContent = 'màj il y a ' + Math.max(0, Math.round((Date.now() - lastOk) / 1000)) + ' s';
+  } else upd.textContent = '…';
+}
+
+function visibleRows() {
+  return Math.max(1, Math.floor(($('clip').clientHeight || 210) / ROW));
+}
+function clampScroll() {
+  var maxOff = Math.max(0, rows.length - visibleRows());
+  off = Math.min(maxOff, Math.max(0, off));
+  $('list').style.transform = 'translateY(-' + (off * ROW) + 'px)';
+}
+function scrollList(d) { off += d; clampScroll(); }
+
+/* Molette : mapping naturel R1 (scrollUp = remonter) */
+window.addEventListener('scrollUp',   function() { scrollList(-2); });
+window.addEventListener('scrollDown', function() { scrollList(2); });
+
+/* Bouton latéral : refresh immédiat + retour en haut */
+window.addEventListener('sideClick', function() { off = 0; clampScroll(); refresh(); });
+
+/* Fallbacks clavier */
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+});
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+setInterval(renderUpd, 1000);
+</script>
+</body>
+</html>

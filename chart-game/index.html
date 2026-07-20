@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Guess the Chart</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; }
+
+#hdr {
+  flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px;
+  padding: 7px 10px 4px 10px;
+}
+#hdr .title { font-size: 12px; font-weight: 800; letter-spacing: 0.5px; color: #A78BFA; }
+#score { margin-left: auto; font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.6); font-variant-numeric: tabular-nums; }
+
+#chart-wrap { flex: 0 0 auto; padding: 2px 8px; position: relative; }
+canvas { display: block; background: rgba(255,255,255,0.03); border-radius: 5px; }
+
+#status {
+  flex: 1 1 auto; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center; gap: 2px; padding: 0 10px;
+}
+#verdict { font-size: 17px; font-weight: 800; }
+#detail  { font-size: 11px; color: rgba(255,255,255,0.55); line-height: 1.4; }
+.green { color: #4ade80; }
+.red   { color: #f87171; }
+
+#btns { flex: 0 0 auto; display: none; gap: 6px; padding: 4px 8px 8px 8px; }
+#btns.visible { display: flex; }
+.btn {
+  flex: 1; padding: 12px 0; border-radius: 7px; border: none;
+  font-size: 15px; font-weight: 800; letter-spacing: 0.5px; font-family: inherit;
+}
+#b-long  { background: rgba(74,222,128,0.22); color: #4ade80; }
+#b-short { background: rgba(248,113,113,0.22); color: #f87171; }
+
+#error {
+  display: none; margin: 0 8px 4px 8px; padding: 3px 6px;
+  background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.4);
+  border-radius: 5px; font-size: 10px; color: #f87171; text-align: center;
+}
+#error.visible { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hdr">
+    <span class="title">GUESS THE CHART</span>
+    <span id="score"></span>
+  </div>
+  <div id="error"></div>
+  <div id="chart-wrap"><canvas id="cv" width="448" height="264" style="width:224px;height:132px"></canvas></div>
+  <div id="status">
+    <div id="verdict"></div>
+    <div id="detail">Chargement…</div>
+  </div>
+  <div id="btns">
+    <button class="btn" id="b-long">▲ LONG</button>
+    <button class="btn" id="b-short">▼ SHORT</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+var API = 'https://api.hyperliquid.xyz/info';
+var SHOWN = 40, REVEAL = 10, TOTAL = 50;
+var LSK = 'cg_stats';
+
+function load(k, def) {
+  try { var v = localStorage.getItem(k); return v === null ? def : JSON.parse(v); }
+  catch (e) { return def; }
+}
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+var stats = load(LSK, { w: 0, l: 0, streak: 0, best: 0 });
+var coins = [];          // liquides, remplis au premier fetch
+var candles = null;      // 50 bougies {o,h,l,c} en nombres
+var roundCoin = null;
+var phase = 'loading';   // loading | guess | reveal | error
+
+var $ = function(id) { return document.getElementById(id); };
+
+function post(body) {
+  return fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+
+function renderScore() {
+  $('score').textContent = '✔' + stats.w + ' ✘' + stats.l + (stats.streak > 1 ? ' 🔥' + stats.streak : '');
+}
+
+function setStatus(v, vCls, d) {
+  $('verdict').textContent = v || '';
+  $('verdict').className = vCls || '';
+  $('detail').innerHTML = d || '';
+}
+
+function setError(msg) {
+  phase = 'error';
+  $('error').classList.add('visible');
+  $('error').textContent = msg;
+  setStatus('', '', 'molette ou tap = réessayer');
+  $('btns').classList.remove('visible');
+}
+
+/* ---------- data ---------- */
+function initCoins() {
+  return post({ type: 'metaAndAssetCtxs' }).then(function(d) {
+    var universe = d[0].universe, ctxs = d[1];
+    var arr = [];
+    for (var i = 0; i < universe.length && i < ctxs.length; i++) {
+      if (universe[i].isDelisted) continue;
+      var vlm = parseFloat(ctxs[i].dayNtlVlm);
+      if (isFinite(vlm)) arr.push({ name: universe[i].name, vlm: vlm });
+    }
+    arr.sort(function(a, b) { return b.vlm - a.vlm; });
+    coins = arr.slice(0, 25).map(function(x) { return x.name; });
+    if (!coins.length) throw new Error('liste vide');
+  });
+}
+
+var MAJORS = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];   // listés depuis longtemps
+
+function fetchRound(tries) {
+  tries = tries || 0;
+  if (tries >= 10) { setError('Impossible de charger des bougies'); return; }
+  // les coins récents n'ont pas d'historique profond : après 3 échecs,
+  // on se rabat sur les majors avec une fenêtre plus courte
+  var pool = tries < 3 ? coins : MAJORS;
+  var maxDays = tries < 3 ? 597 : 297;
+  var coin = pool[Math.floor(Math.random() * pool.length)];
+  var daysBack = 3 + Math.random() * maxDays;
+  var endT = Date.now() - daysBack * 86400000;
+  var startT = endT - (TOTAL + 6) * 3600000;
+  post({ type: 'candleSnapshot', req: { coin: coin, interval: '1h', startTime: Math.round(startT), endTime: Math.round(endT) } })
+    .then(function(arr) {
+      if (!arr || arr.length < TOTAL) { fetchRound(tries + 1); return; }
+      var last = arr.slice(-TOTAL);
+      candles = last.map(function(k) {
+        return { o: parseFloat(k.o), h: parseFloat(k.h), l: parseFloat(k.l), c: parseFloat(k.c) };
+      });
+      if (candles.some(function(k) { return !isFinite(k.c) || k.c <= 0; })) { fetchRound(tries + 1); return; }
+      roundCoin = coin;
+      phase = 'guess';
+      $('error').classList.remove('visible');
+      draw(SHOWN);
+      setStatus('LONG ou SHORT ?', '', '40 bougies 1 h · coin mystère<br>que font les 10 suivantes ?');
+      $('btns').classList.add('visible');
+    })
+    .catch(function() { fetchRound(tries + 1); });
+}
+
+function newRound() {
+  phase = 'loading';
+  candles = null;
+  $('btns').classList.remove('visible');
+  setStatus('', '', 'Chargement…');
+  var p = coins.length ? Promise.resolve() : initCoins();
+  p.then(function() { fetchRound(0); })
+   .catch(function(e) { setError('Erreur réseau (' + (e.message || 'fetch') + ')'); });
+}
+
+/* ---------- dessin ---------- */
+function draw(n) {
+  var cv = $('cv'), ctx = cv.getContext('2d');
+  var W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!candles) return;
+
+  var pad = 6;
+  var lo = Infinity, hi = -Infinity;
+  for (var i = 0; i < n; i++) { lo = Math.min(lo, candles[i].l); hi = Math.max(hi, candles[i].h); }
+  var span = (hi - lo) || 1;
+  function Y(p) { return pad + (H - 2 * pad) * (1 - (p - lo) / span); }
+
+  var cw = W / n;                    // largeur par bougie
+  var bw = Math.max(2, cw * 0.62);   // largeur du corps
+
+  for (var j = 0; j < n; j++) {
+    var k = candles[j];
+    var x = j * cw + cw / 2;
+    var up = k.c >= k.o;
+    ctx.strokeStyle = ctx.fillStyle = up ? '#4ade80' : '#f87171';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, Y(k.h)); ctx.lineTo(x, Y(k.l));
+    ctx.stroke();
+    var yO = Y(k.o), yC = Y(k.c);
+    var top = Math.min(yO, yC), h = Math.max(2, Math.abs(yC - yO));
+    ctx.fillRect(x - bw / 2, top, bw, h);
+  }
+
+  if (n > SHOWN) {  // séparation avant les bougies révélées
+    var xs = SHOWN * cw;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(xs, 0); ctx.lineTo(xs, H); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+/* ---------- jeu ---------- */
+function guess(dir) {   // dir = 1 long, -1 short
+  if (phase !== 'guess') return;
+  phase = 'reveal';
+  $('btns').classList.remove('visible');
+  draw(TOTAL);
+  var c0 = candles[SHOWN - 1].c, c1 = candles[TOTAL - 1].c;
+  var pct = (c1 / c0 - 1) * 100;
+  var win = (dir === 1 && c1 > c0) || (dir === -1 && c1 < c0);
+  var flat = (c1 === c0);
+  var pctTxt = (pct >= 0 ? '+' : '−') + Math.abs(pct).toFixed(2).replace('.', ',') + ' %';
+
+  if (flat) {
+    setStatus('PLAT — égalité', '', 'C\'était <b>' + roundCoin + '</b> · ' + pctTxt + '<br>molette ou tap = manche suivante');
+  } else if (win) {
+    stats.w++; stats.streak++;
+    if (stats.streak > stats.best) stats.best = stats.streak;
+    setStatus('GAGNÉ ✔', 'green', 'C\'était <b>' + roundCoin + '</b> · ' + pctTxt +
+      '<br>série ' + stats.streak + ' · record ' + stats.best + ' · molette = suivant');
+  } else {
+    stats.l++; stats.streak = 0;
+    setStatus('PERDU ✘', 'red', 'C\'était <b>' + roundCoin + '</b> · ' + pctTxt +
+      '<br>molette ou tap = manche suivante');
+  }
+  save(LSK, stats);
+  renderScore();
+}
+
+function advance() {
+  if (phase === 'reveal' || phase === 'error') newRound();
+}
+
+/* ---------- contrôles ---------- */
+$('b-long').addEventListener('pointerup',  function() { guess(1); });
+$('b-short').addEventListener('pointerup', function() { guess(-1); });
+$('status').addEventListener('pointerup', advance);
+$('chart-wrap').addEventListener('pointerup', advance);
+
+// Molette : lancer la manche suivante (les deux sens)
+window.addEventListener('scrollUp', advance);
+window.addEventListener('scrollDown', advance);
+window.addEventListener('sideClick', advance);
+
+// Fallbacks clavier
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp')    window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown')  window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')     window.dispatchEvent(new Event('sideClick'));
+  if (e.key === 'ArrowLeft')  guess(1);
+  if (e.key === 'ArrowRight') guess(-1);
+});
+
+renderScore();
+newRound();
+</script>
+</body>
+</html>

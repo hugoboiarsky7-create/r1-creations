@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Tâches</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; position: relative; }
+
+#hdr {
+  flex: 0 0 auto; display: flex; align-items: baseline; gap: 8px;
+  padding: 7px 10px 5px 10px;
+}
+#hdr .title { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #FE5000; }
+#fire { margin-left: auto; font-size: 12px; font-weight: 800; }
+
+#clip { flex: 1 1 auto; overflow: hidden; }
+#list { transition: transform 0.1s ease-out; }
+
+.sec-hdr {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.8px;
+  color: rgba(255,255,255,0.4); padding: 5px 10px 2px 10px; height: 22px;
+}
+.task {
+  height: 26px; display: flex; align-items: center; gap: 7px;
+  padding: 0 10px; font-size: 13px;
+}
+.task.sel { background: rgba(254,80,0,0.10); border-left: 2px solid rgba(254,80,0,0.6); padding-left: 8px; }
+.task .box { font-size: 13px; color: rgba(255,255,255,0.5); flex: 0 0 auto; }
+.task.done .box { color: #4ade80; }
+.task .txt { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task.done .txt { text-decoration: line-through; color: rgba(255,255,255,0.35); }
+
+.empty { padding: 30px 24px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.35); line-height: 1.7; }
+
+#hint {
+  flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center;
+  padding: 3px 6px 5px 6px; border-top: 1px solid rgba(255,255,255,0.08); line-height: 1.4;
+}
+
+/* Voice / input overlays */
+.overlay {
+  display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(14,14,16,0.95); z-index: 50;
+  flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 14px;
+}
+.overlay.visible { display: flex; }
+#voice-ov .mic { font-size: 34px; }
+#voice-ov .lbl { font-size: 13px; font-weight: 700; color: #FE5000; }
+
+#type-ov textarea {
+  width: 100%; height: 90px; background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+  color: #fff; font-size: 13px; font-family: inherit; padding: 8px; resize: none; outline: none;
+}
+#type-ov .row { display: flex; gap: 8px; width: 100%; }
+#type-ov button {
+  flex: 1; padding: 9px 0; border-radius: 6px; border: none;
+  font-size: 12px; font-weight: 800; font-family: inherit;
+}
+#t-save { background: #FE5000; color: #0e0e10; }
+#t-cancel { background: rgba(255,255,255,0.12); color: #fff; }
+
+#toast {
+  display: none; position: absolute; left: 20px; right: 20px; bottom: 30px; z-index: 60;
+  background: rgba(255,255,255,0.12); border-radius: 6px; padding: 6px;
+  font-size: 11px; font-weight: 700; text-align: center;
+}
+#toast.visible { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hdr">
+    <span class="title">TÂCHES</span>
+    <span id="fire"></span>
+  </div>
+  <div id="clip"><div id="list"></div></div>
+  <div id="hint">maintiens le bouton latéral = dicter · tap = cocher<br>swipe = changer de section · appui long = supprimer</div>
+
+  <div class="overlay" id="voice-ov">
+    <div class="mic">🎤</div>
+    <div class="lbl" id="voice-lbl">J'écoute…</div>
+  </div>
+
+  <div class="overlay" id="type-ov">
+    <div style="font-size:12px;font-weight:700;align-self:flex-start">Nouvelle tâche</div>
+    <textarea id="t-input"></textarea>
+    <div class="row">
+      <button id="t-cancel">Annuler</button>
+      <button id="t-save">Ajouter</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+'use strict';
+var LSK = { tasks: 'tk_tasks', streak: 'tk_streak', last: 'tk_last' };
+
+function load(k, def) {
+  try { var v = localStorage.getItem(k); return v === null ? def : JSON.parse(v); }
+  catch (e) { return def; }
+}
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+var tasks  = load(LSK.tasks, []);   // {id, text, sec:'t'|'l', done}
+var streak = load(LSK.streak, 0);
+var lastDone = load(LSK.last, null); // 'YYYY-MM-DD'
+
+var sel = 0;          // index dans la liste aplatie des tâches
+var scrollOff = 0;    // en pixels
+var isListening = false;
+
+var $ = function(id) { return document.getElementById(id); };
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+function todayStr() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function yesterdayStr() {
+  var d = new Date(Date.now() - 86400000);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// Vérifie si le streak est cassé (aucune tâche cochée hier ni aujourd'hui)
+function checkStreakExpiry() {
+  if (lastDone !== null && lastDone !== todayStr() && lastDone !== yesterdayStr()) {
+    streak = 0; save(LSK.streak, streak);
+  }
+}
+
+/* ---------- ordre d'affichage : liste aplatie ---------- */
+function flat() {
+  var t = tasks.filter(function(x) { return x.sec === 't'; });
+  var l = tasks.filter(function(x) { return x.sec === 'l'; });
+  return { today: t, later: l, all: t.concat(l) };
+}
+
+var ROW = 26, SEC = 22;
+
+function render() {
+  checkStreakExpiry();
+  $('fire').textContent = streak > 0 ? '🔥 ' + streak : '';
+  var f = flat();
+  if (!f.all.length) {
+    $('list').innerHTML = '<div class="empty">Aucune tâche.<br><br>Maintiens le bouton latéral<br>et dicte ta première tâche 🎤</div>';
+    $('list').style.transform = 'translateY(0)';
+    return;
+  }
+  if (sel >= f.all.length) sel = f.all.length - 1;
+  if (sel < 0) sel = 0;
+
+  var html = '', y = 0, selY = 0, idx = 0;
+  html += '<div class="sec-hdr">AUJOURD\'HUI (' + f.today.length + ')</div>'; y += SEC;
+  for (var i = 0; i < f.today.length; i++) {
+    if (idx === sel) selY = y;
+    html += rowHtml(f.today[i], idx); y += ROW; idx++;
+  }
+  html += '<div class="sec-hdr">PLUS TARD (' + f.later.length + ')</div>'; y += SEC;
+  for (var j = 0; j < f.later.length; j++) {
+    if (idx === sel) selY = y;
+    html += rowHtml(f.later[j], idx); y += ROW; idx++;
+  }
+  $('list').innerHTML = html;
+
+  // garder la sélection visible
+  var viewH = $('clip').clientHeight || 200;
+  if (selY < scrollOff) scrollOff = selY;
+  if (selY + ROW > scrollOff + viewH) scrollOff = selY + ROW - viewH;
+  var maxOff = Math.max(0, y - viewH);
+  scrollOff = Math.min(maxOff, Math.max(0, scrollOff));
+  $('list').style.transform = 'translateY(-' + scrollOff + 'px)';
+}
+
+function rowHtml(t, idx) {
+  return '<div class="task' + (t.done ? ' done' : '') + (idx === sel ? ' sel' : '') + '" data-id="' + t.id + '">' +
+    '<span class="box">' + (t.done ? '☑' : '☐') + '</span>' +
+    '<span class="txt">' + esc(t.text) + '</span></div>';
+}
+
+var toastT = null;
+function toast(t) {
+  var el = $('toast');
+  el.textContent = t;
+  el.classList.add('visible');
+  clearTimeout(toastT);
+  toastT = setTimeout(function() { el.classList.remove('visible'); }, 1400);
+}
+
+/* ---------- actions ---------- */
+function addTask(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  tasks.push({ id: Date.now() + '' + Math.floor(Math.random() * 1000), text: text, sec: 't', done: false });
+  save(LSK.tasks, tasks);
+  var f = flat();
+  sel = f.today.length - 1;   // sélectionne la nouvelle tâche
+  render();
+  toast('Ajoutée : ' + text.slice(0, 24));
+}
+
+function byId(id) {
+  for (var i = 0; i < tasks.length; i++) if (tasks[i].id === id) return tasks[i];
+  return null;
+}
+function flatIndexOf(id) {
+  var all = flat().all;
+  for (var i = 0; i < all.length; i++) if (all[i].id === id) return i;
+  return -1;
+}
+
+function toggleDone(t) {
+  if (!t) return;
+  t.done = !t.done;
+  if (t.done) {
+    var today = todayStr();
+    if (lastDone !== today) {
+      streak = (lastDone === yesterdayStr()) ? streak + 1 : 1;
+      lastDone = today;
+      save(LSK.streak, streak); save(LSK.last, lastDone);
+      toast('🔥 Streak : ' + streak + ' jour' + (streak > 1 ? 's' : ''));
+    }
+  }
+  save(LSK.tasks, tasks);
+  render();
+}
+function moveSection(t) {
+  if (!t) return;
+  t.sec = (t.sec === 't') ? 'l' : 't';
+  save(LSK.tasks, tasks);
+  sel = flatIndexOf(t.id);
+  render();
+  toast(t.sec === 't' ? '→ AUJOURD\'HUI' : '→ PLUS TARD');
+}
+function removeTask(t) {
+  if (!t) return;
+  tasks = tasks.filter(function(x) { return x.id !== t.id; });
+  save(LSK.tasks, tasks);
+  render();
+  toast('Supprimée');
+}
+function selectedTask() { return flat().all[sel] || null; }
+
+/* ---------- molette (mapping naturel R1) ---------- */
+window.addEventListener('scrollUp',   function() { if (overlayOpen()) return; sel--; render(); });
+window.addEventListener('scrollDown', function() { if (overlayOpen()) return; sel++; render(); });
+
+/* ---------- clic latéral : cocher la tâche sélectionnée ---------- */
+window.addEventListener('sideClick', function() {
+  if (overlayOpen()) return;
+  toggleDone(selectedTask());
+});
+
+function overlayOpen() {
+  return $('voice-ov').classList.contains('visible') || $('type-ov').classList.contains('visible');
+}
+
+/* ---------- voix : maintien du PTT ---------- */
+var hasVoice = (typeof CreationVoiceHandler !== 'undefined');
+
+window.addEventListener('longPressStart', function() {
+  if (overlayOpen() && !$('voice-ov').classList.contains('visible')) return;
+  if (typeof CreationVoiceHandler !== 'undefined') {
+    if (isListening) return;
+    isListening = true;
+    $('voice-lbl').textContent = 'J\'écoute…';
+    $('voice-ov').classList.add('visible');
+    CreationVoiceHandler.postMessage('start');
+  }
+});
+window.addEventListener('longPressEnd', function() {
+  if (typeof CreationVoiceHandler !== 'undefined') {
+    if (!isListening) return;
+    $('voice-lbl').textContent = 'Transcription…';
+    CreationVoiceHandler.postMessage('stop');
+    // isListening remis à false dans onPluginMessage
+  } else {
+    openType();   // pas de voix (desktop / firmware) → saisie clavier
+  }
+});
+window.onPluginMessage = function(data) {
+  if (!data || data.type !== 'sttEnded') return;
+  isListening = false;
+  $('voice-ov').classList.remove('visible');
+  var tr = (data.transcript || '').trim();
+  if (tr) addTask(tr);
+  else toast('Rien entendu');
+};
+
+/* ---------- saisie clavier (fallback + édition R1) ---------- */
+function openType() {
+  $('t-input').value = '';
+  $('type-ov').classList.add('visible');
+  setTimeout(function() { $('t-input').focus(); }, 60);
+}
+function closeType() {
+  $('t-input').blur();
+  $('type-ov').classList.remove('visible');
+}
+$('t-save').addEventListener('pointerup', function() { addTask($('t-input').value); closeType(); });
+$('t-cancel').addEventListener('pointerup', function() { closeType(); });
+
+/* ---------- tactile sur les tâches ---------- */
+(function() {
+  var pressT = null, longFired = false, x0 = 0, y0 = 0, targetId = null;
+  var list = $('list');
+  list.addEventListener('pointerdown', function(e) {
+    var row = e.target.closest('.task');
+    if (!row) return;
+    targetId = row.dataset.id;
+    x0 = e.clientX; y0 = e.clientY; longFired = false;
+    pressT = setTimeout(function() {
+      longFired = true;
+      removeTask(byId(targetId));
+    }, 600);
+  });
+  list.addEventListener('pointerup', function(e) {
+    clearTimeout(pressT);
+    if (longFired || targetId === null) { targetId = null; return; }
+    var dx = e.clientX - x0, dy = e.clientY - y0;
+    var t = byId(targetId);
+    targetId = null;
+    if (!t) return;
+    if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) {
+      moveSection(t);          // swipe horizontal = changer de section
+    } else if (Math.abs(dx) < 8 && Math.abs(dy) < 8) {
+      sel = flatIndexOf(t.id);
+      toggleDone(t);           // tap = cocher
+    }
+  });
+  ['pointerleave', 'pointercancel'].forEach(function(ev) {
+    list.addEventListener(ev, function() { clearTimeout(pressT); });
+  });
+})();
+
+/* ---------- fallbacks clavier desktop ---------- */
+document.addEventListener('keydown', function(e) {
+  if ($('type-ov').classList.contains('visible')) {
+    if (e.key === 'Enter') { addTask($('t-input').value); closeType(); }
+    if (e.key === 'Escape') closeType();
+    return;
+  }
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+  if (e.key === ' ' && !e.repeat) window.dispatchEvent(new Event('longPressStart'));
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') moveSection(selectedTask());
+  if (e.key === 'Delete') removeTask(selectedTask());
+});
+document.addEventListener('keyup', function(e) {
+  if (e.key === ' ' && !$('type-ov').classList.contains('visible')) {
+    window.dispatchEvent(new Event('longPressEnd'));
+  }
+});
+
+render();
+</script>
+</body>
+</html>
