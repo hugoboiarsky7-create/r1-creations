@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Carnet Asie</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; position: relative; }
+
+#hdr { flex: 0 0 auto; text-align: center; padding: 8px 10px 5px 10px; }
+#countdown { font-size: 24px; font-weight: 800; color: #FB7185; }
+#dest { font-size: 10px; color: rgba(255,255,255,0.45); margin-top: 1px; }
+
+#totals {
+  flex: 0 0 auto; display: flex; justify-content: space-around;
+  padding: 4px 8px; border-top: 1px solid rgba(255,255,255,0.08); border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.tot { text-align: center; }
+.tot .v { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tot .l { font-size: 9px; color: rgba(255,255,255,0.4); }
+
+#clip { flex: 1 1 auto; overflow: hidden; }
+#list { transition: transform 0.1s ease-out; }
+.day-hdr { font-size: 10px; font-weight: 800; color: rgba(255,255,255,0.4); padding: 5px 10px 2px 10px; letter-spacing: 0.5px; display: flex; }
+.day-hdr .dt { margin-left: auto; font-variant-numeric: tabular-nums; }
+.exp { height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 12px; }
+.exp .lb { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exp .am { font-weight: 800; font-variant-numeric: tabular-nums; }
+.exp .eu { color: rgba(255,255,255,0.4); font-size: 10px; font-variant-numeric: tabular-nums; }
+.exp .fl { font-size: 11px; }
+.empty { padding: 26px 22px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.35); line-height: 1.7; }
+
+#hint {
+  flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center;
+  padding: 3px 6px 5px 6px; border-top: 1px solid rgba(255,255,255,0.08); line-height: 1.4;
+}
+#rates-info { color: rgba(255,255,255,0.25); }
+
+.overlay {
+  display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(14,14,16,0.96); z-index: 50;
+  flex-direction: column; gap: 8px; padding: 14px;
+}
+.overlay.visible { display: flex; }
+.overlay .t { font-size: 12px; font-weight: 800; }
+.overlay .s { font-size: 10px; color: rgba(255,255,255,0.45); line-height: 1.5; }
+.overlay textarea, .overlay input {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px; color: #fff; font-size: 13px; font-family: inherit;
+  padding: 8px; outline: none; width: 100%;
+}
+.overlay textarea { flex: 1; resize: none; }
+.overlay .row { display: flex; gap: 8px; }
+.overlay button { flex: 1; padding: 9px 0; border-radius: 6px; border: none; font-size: 12px; font-weight: 800; font-family: inherit; }
+.ok { background: #FB7185; color: #0e0e10; }
+.ko { background: rgba(255,255,255,0.12); color: #fff; }
+
+#voice-ov { align-items: center; justify-content: center; }
+#voice-ov .mic { font-size: 34px; }
+#voice-ov .vl { font-size: 13px; font-weight: 700; color: #FB7185; }
+
+#toast {
+  display: none; position: absolute; left: 20px; right: 20px; bottom: 34px; z-index: 60;
+  background: rgba(255,255,255,0.12); border-radius: 6px; padding: 6px;
+  font-size: 11px; font-weight: 700; text-align: center;
+}
+#toast.visible { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hdr">
+    <div id="countdown">J-…</div>
+    <div id="dest"></div>
+  </div>
+  <div id="totals"></div>
+  <div id="clip"><div id="list"></div></div>
+  <div id="hint">maintiens PTT : « café 450 yens » · molette = défiler<br>appui long dépense = supprimer · appui long en-tête = régler <span id="rates-info"></span></div>
+
+  <div class="overlay" id="voice-ov">
+    <div class="mic">🎤</div>
+    <div class="vl" id="voice-lbl">J'écoute…</div>
+  </div>
+
+  <div class="overlay" id="type-ov">
+    <div class="t">Nouvelle dépense</div>
+    <div class="s">Ex : « café 450 yens », « taxi 12000 wons », « hôtel 60 euros »</div>
+    <textarea id="t-input"></textarea>
+    <div class="row"><button class="ko" id="t-cancel">Annuler</button><button class="ok" id="t-save">Ajouter</button></div>
+  </div>
+
+  <div class="overlay" id="cfg-ov">
+    <div class="t">Date de départ</div>
+    <input type="text" id="cfg-date" placeholder="AAAA-MM-JJ">
+    <div class="t" style="margin-top:6px">Destination</div>
+    <input type="text" id="cfg-dest">
+    <div class="row" style="margin-top:auto"><button class="ko" id="cfg-cancel">Annuler</button><button class="ok" id="cfg-save">OK</button></div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+'use strict';
+var LSK = { exp: 'ca_exp', cfg: 'ca_cfg', rates: 'ca_rates' };
+function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+var cfg = load(LSK.cfg, { date: '2027-04-01', dest: 'Japon & Corée 2027' });
+var exps = load(LSK.exp, []);   // {id, t, amount, cur, label}
+var rates = load(LSK.rates, null);  // {t, JPY, KRW} — pour 1 EUR
+var scrollOff = 0, isListening = false;
+
+var CURS = {
+  JPY: { words: ['yen', 'yens', 'jpy', '¥'], flag: '🇯🇵', pays: 'Japon' },
+  KRW: { words: ['won', 'wons', 'krw', '₩'], flag: '🇰🇷', pays: 'Corée' },
+  EUR: { words: ['euro', 'euros', 'eur', '€'], flag: '🇪🇺', pays: 'Europe' }
+};
+
+var $ = function(id) { return document.getElementById(id); };
+function esc(s) { return String(s).replace(/[&<>"]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+/* ---------------- taux (frankfurter.dev, cache offline) ---------------- */
+function fetchRates() {
+  fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=JPY,KRW')
+    .then(function(r) { if (!r.ok) throw 0; return r.json(); })
+    .then(function(d) {
+      rates = { t: Date.now(), JPY: d.rates.JPY, KRW: d.rates.KRW };
+      save(LSK.rates, rates);
+      render();
+    })
+    .catch(function() { /* on garde le cache */ render(); });
+}
+function toEur(amount, cur) {
+  if (cur === 'EUR') return amount;
+  if (!rates || !rates[cur]) return null;
+  return amount / rates[cur];
+}
+
+/* ---------------- parsing d'une dépense dictée ---------------- */
+function parseExpense(text) {
+  var t = text.toLowerCase().replace(/,/g, '.').trim();
+  if (!t) return null;
+  // montant : premier nombre (gère "12 000" collé par la dictée)
+  var m = t.match(/(\d[\d\s]*(?:\.\d+)?)/);
+  if (!m) return null;
+  var amount = parseFloat(m[1].replace(/\s/g, ''));
+  if (!isFinite(amount) || amount <= 0) return null;
+  // devise : mot-clé connu, sinon devine selon la destination (yens par défaut)
+  var cur = null;
+  Object.keys(CURS).forEach(function(k) {
+    CURS[k].words.forEach(function(w) {
+      if (cur) return;
+      if (t.indexOf(w) !== -1) cur = k;
+    });
+  });
+  if (!cur) cur = 'JPY';
+  // libellé : le texte sans le montant ni le mot de devise
+  var label = t.replace(m[1], ' ');
+  Object.keys(CURS).forEach(function(k) { CURS[k].words.forEach(function(w) { label = label.replace(new RegExp('\\b' + w + '\\b', 'g'), ' '); }); });
+  label = label.replace(/\s+/g, ' ').trim();
+  if (!label) label = 'divers';
+  return { amount: amount, cur: cur, label: label.charAt(0).toUpperCase() + label.slice(1) };
+}
+
+function addExpense(text) {
+  var p = parseExpense(text);
+  if (!p) { toast('Pas compris — « café 450 yens »'); return; }
+  exps.push({ id: Date.now() + '' + Math.floor(Math.random() * 1000), t: Date.now(), amount: p.amount, cur: p.cur, label: p.label });
+  save(LSK.exp, exps);
+  scrollOff = 0;
+  render();
+  var eu = toEur(p.amount, p.cur);
+  toast('+ ' + p.label + ' · ' + fmtAmt(p.amount, p.cur) + (eu !== null ? ' (' + eu.toFixed(2).replace('.', ',') + ' €)' : ''));
+}
+
+/* ---------------- format ---------------- */
+function fmtAmt(a, cur) {
+  var s = (cur === 'EUR' ? a.toFixed(2) : String(Math.round(a))).replace('.', ',');
+  s = s.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return s + ' ' + (cur === 'JPY' ? '¥' : cur === 'KRW' ? '₩' : '€');
+}
+function fmtEur(a) { return a.toFixed(2).replace('.', ',') + ' €'; }
+function dayKey(t) { var d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function dayLabel(k) {
+  var today = dayKey(Date.now());
+  var yest = dayKey(Date.now() - 86400000);
+  if (k === today) return "AUJOURD'HUI";
+  if (k === yest) return 'HIER';
+  var p = k.split('-');
+  return p[2] + '/' + p[1];
+}
+
+/* ---------------- rendu ---------------- */
+function render() {
+  // compte à rebours
+  var target = new Date(cfg.date + 'T00:00:00');
+  var days = Math.ceil((target - Date.now()) / 86400000);
+  $('countdown').textContent = isNaN(days) ? 'J-…' : (days > 0 ? 'J−' + days : '🛫 En voyage !');
+  $('dest').textContent = cfg.dest + ' · départ ' + cfg.date;
+  $('rates-info').textContent = rates ? '· taux du ' + dayLabel(dayKey(rates.t)).toLowerCase() : '· taux indisponibles';
+
+  // totaux par pays + aujourd'hui
+  var perPays = {}, today = 0, todayK = dayKey(Date.now());
+  exps.forEach(function(e) {
+    var eu = toEur(e.amount, e.cur);
+    if (eu === null) return;
+    var pays = CURS[e.cur].pays;
+    perPays[pays] = (perPays[pays] || 0) + eu;
+    if (dayKey(e.t) === todayK) today += eu;
+  });
+  var th = '<div class="tot"><div class="v">' + fmtEur(today) + '</div><div class="l">AUJOURD\'HUI</div></div>';
+  Object.keys(perPays).forEach(function(p) {
+    th += '<div class="tot"><div class="v">' + fmtEur(perPays[p]) + '</div><div class="l">' + p.toUpperCase() + '</div></div>';
+  });
+  $('totals').innerHTML = th;
+
+  // liste groupée par jour (récent en premier)
+  var list = $('list');
+  if (!exps.length) {
+    list.innerHTML = '<div class="empty">Aucune dépense.<br><br>Maintiens le bouton latéral et dicte :<br>« café 450 yens » 🎤</div>';
+    list.style.transform = 'translateY(0)';
+    return;
+  }
+  var byDay = {};
+  exps.forEach(function(e) { var k = dayKey(e.t); (byDay[k] = byDay[k] || []).push(e); });
+  var keys = Object.keys(byDay).sort().reverse();
+  var html = '';
+  keys.forEach(function(k) {
+    var tot = 0;
+    byDay[k].forEach(function(e) { var eu = toEur(e.amount, e.cur); if (eu !== null) tot += eu; });
+    html += '<div class="day-hdr">' + dayLabel(k) + '<span class="dt">' + fmtEur(tot) + '</span></div>';
+    byDay[k].slice().reverse().forEach(function(e) {
+      var eu = toEur(e.amount, e.cur);
+      html += '<div class="exp" data-id="' + e.id + '">' +
+        '<span class="fl">' + CURS[e.cur].flag + '</span>' +
+        '<span class="lb">' + esc(e.label) + '</span>' +
+        '<span class="am">' + fmtAmt(e.amount, e.cur) + '</span>' +
+        '<span class="eu">' + (eu !== null ? fmtEur(eu) : '?') + '</span></div>';
+    });
+  });
+  list.innerHTML = html;
+  clampScroll();
+}
+function clampScroll() {
+  var H = $('clip').clientHeight || 150;
+  var total = $('list').scrollHeight;
+  scrollOff = Math.min(Math.max(0, total - H), Math.max(0, scrollOff));
+  $('list').style.transform = 'translateY(-' + scrollOff + 'px)';
+}
+
+var toastT = null;
+function toast(t) {
+  var el = $('toast');
+  el.textContent = t; el.classList.add('visible');
+  clearTimeout(toastT);
+  toastT = setTimeout(function() { el.classList.remove('visible'); }, 1800);
+}
+
+/* ---------------- voix (PTT) + fallback clavier ---------------- */
+function anyOverlay() { return ['voice-ov', 'type-ov', 'cfg-ov'].some(function(id) { return $(id).classList.contains('visible'); }); }
+
+window.addEventListener('longPressStart', function() {
+  if (anyOverlay() && !$('voice-ov').classList.contains('visible')) return;
+  if (typeof CreationVoiceHandler !== 'undefined') {
+    if (isListening) return;
+    isListening = true;
+    $('voice-lbl').textContent = 'J\'écoute…';
+    $('voice-ov').classList.add('visible');
+    CreationVoiceHandler.postMessage('start');
+  }
+});
+window.addEventListener('longPressEnd', function() {
+  if (typeof CreationVoiceHandler !== 'undefined') {
+    if (!isListening) return;
+    $('voice-lbl').textContent = 'Transcription…';
+    CreationVoiceHandler.postMessage('stop');
+  } else if (!anyOverlay()) {
+    $('t-input').value = '';
+    $('type-ov').classList.add('visible');
+    setTimeout(function() { $('t-input').focus(); }, 60);
+  }
+});
+window.onPluginMessage = function(data) {
+  if (!data || data.type !== 'sttEnded') return;
+  isListening = false;
+  $('voice-ov').classList.remove('visible');
+  var tr = (data.transcript || '').trim();
+  if (tr) addExpense(tr);
+};
+
+$('t-save').addEventListener('pointerup', function() { addExpense($('t-input').value); $('t-input').blur(); $('type-ov').classList.remove('visible'); });
+$('t-cancel').addEventListener('pointerup', function() { $('t-input').blur(); $('type-ov').classList.remove('visible'); });
+
+/* ---------------- réglages (appui long en-tête) ---------------- */
+(function() {
+  var t = null;
+  $('hdr').addEventListener('pointerdown', function() {
+    t = setTimeout(function() {
+      $('cfg-date').value = cfg.date; $('cfg-dest').value = cfg.dest;
+      $('cfg-ov').classList.add('visible');
+    }, 650);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev) { $('hdr').addEventListener(ev, function() { clearTimeout(t); }); });
+})();
+$('cfg-save').addEventListener('pointerup', function() {
+  var d = $('cfg-date').value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) cfg.date = d;
+  cfg.dest = $('cfg-dest').value.trim() || cfg.dest;
+  save(LSK.cfg, cfg);
+  $('cfg-ov').classList.remove('visible');
+  render();
+});
+$('cfg-cancel').addEventListener('pointerup', function() { $('cfg-ov').classList.remove('visible'); });
+
+/* ---------------- suppression (appui long sur une dépense) ---------------- */
+(function() {
+  var t = null, longFired = false, targetId = null;
+  var list = $('list');
+  list.addEventListener('pointerdown', function(e) {
+    var row = e.target.closest('.exp');
+    if (!row) return;
+    targetId = row.dataset.id; longFired = false;
+    t = setTimeout(function() {
+      longFired = true;
+      exps = exps.filter(function(x) { return x.id !== targetId; });
+      save(LSK.exp, exps);
+      render(); toast('Supprimée');
+    }, 600);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev) { list.addEventListener(ev, function() { clearTimeout(t); }); });
+})();
+
+/* ---------------- molette ---------------- */
+window.addEventListener('scrollUp',   function() { if (!anyOverlay()) { scrollOff -= 26; clampScroll(); } });
+window.addEventListener('scrollDown', function() { if (!anyOverlay()) { scrollOff += 26; clampScroll(); } });
+
+document.addEventListener('keydown', function(e) {
+  if ($('type-ov').classList.contains('visible')) { if (e.key === 'Enter') $('t-save').dispatchEvent(new PointerEvent('pointerup')); if (e.key === 'Escape') $('t-cancel').dispatchEvent(new PointerEvent('pointerup')); return; }
+  if ($('cfg-ov').classList.contains('visible')) { if (e.key === 'Escape') $('cfg-cancel').dispatchEvent(new PointerEvent('pointerup')); return; }
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === ' ' && !e.repeat) window.dispatchEvent(new Event('longPressStart'));
+});
+document.addEventListener('keyup', function(e) {
+  if (e.key === ' ' && !$('type-ov').classList.contains('visible')) window.dispatchEvent(new Event('longPressEnd'));
+});
+
+fetchRates();
+setInterval(fetchRates, 6 * 3600 * 1000);   // rafraîchit les taux 4×/jour
+render();
+</script>
+</body>
+</html>

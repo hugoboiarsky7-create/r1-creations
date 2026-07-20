@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Blind Test Rap</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; position: relative; }
+.screen { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; flex-direction: column; }
+.screen.visible { display: flex; }
+
+.hdr { flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px; padding: 7px 10px 4px 10px; }
+.hdr .t { font-size: 13px; font-weight: 800; color: #FBBF24; letter-spacing: 0.5px; }
+.hdr .c { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.45); }
+
+/* Menu */
+.pl-row { margin: 3px 10px; padding: 9px 10px; border-radius: 7px; background: rgba(255,255,255,0.05); display: flex; align-items: baseline; gap: 6px; }
+.pl-row.sel { background: rgba(251,191,36,0.12); outline: 1px solid rgba(251,191,36,0.5); }
+.pl-row .n { font-size: 13px; font-weight: 800; }
+.pl-row .d { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.45); font-variant-numeric: tabular-nums; }
+#duel-toggle { margin: 6px 10px 3px 10px; padding: 8px 10px; border-radius: 7px; background: rgba(255,255,255,0.05); font-size: 12px; font-weight: 800; text-align: center; }
+#duel-toggle.on { background: rgba(244,114,182,0.18); color: #F472B6; }
+.hint { flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center; padding: 3px 6px 5px 6px; border-top: 1px solid rgba(255,255,255,0.08); margin-top: auto; }
+
+/* Jeu */
+#game-mid { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; text-align: center; }
+#gm-status { font-size: 15px; font-weight: 800; }
+#gm-sub { font-size: 11px; color: rgba(255,255,255,0.5); line-height: 1.5; }
+#vinyl { font-size: 44px; }
+#vinyl.spin { animation: spin 2.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#art { width: 84px; height: 84px; border-radius: 8px; display: none; }
+#rev-title { font-size: 15px; font-weight: 800; line-height: 1.25; }
+#rev-artist { font-size: 12px; color: #FBBF24; font-weight: 700; }
+#gbtns { flex: 0 0 auto; display: flex; gap: 6px; padding: 4px 10px 8px 10px; }
+#gbtns button { flex: 1; padding: 11px 0; border-radius: 7px; border: none; font-size: 12px; font-weight: 800; font-family: inherit; }
+#b-reveal { background: rgba(251,191,36,0.2); color: #FBBF24; }
+#b-fail { background: rgba(248,113,113,0.22); color: #f87171; display: none; }
+#b-good { background: rgba(74,222,128,0.22); color: #4ade80; display: none; }
+#duel-bar { flex: 0 0 auto; display: none; justify-content: space-around; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+#duel-bar .p1 { color: #60A5FA; } #duel-bar .p2 { color: #F472B6; }
+#duel-bar .turn { text-decoration: underline; }
+#err {
+  display: none; margin: 0 8px 3px 8px; padding: 3px 6px;
+  background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.4);
+  border-radius: 5px; font-size: 10px; color: #f87171; text-align: center;
+}
+#err.visible { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="screen visible" id="menu">
+    <div class="hdr"><span class="t">BLIND TEST</span><span class="c" id="m-score"></span></div>
+    <div id="pl-list"></div>
+    <div id="duel-toggle">MODE DUEL : OFF</div>
+    <div class="hint">molette = playlist · tap ou clic latéral = jouer · tap duel = 2 joueurs</div>
+  </div>
+
+  <div class="screen" id="game">
+    <div class="hdr"><span class="t" id="g-pl"></span><span class="c" id="g-score"></span></div>
+    <div id="duel-bar"><span class="p1" id="d1">J1 : 0</span><span class="p2" id="d2">J2 : 0</span></div>
+    <div id="err"></div>
+    <div id="game-mid">
+      <div id="vinyl">🎵</div>
+      <img id="art" alt="">
+      <div id="gm-status"></div>
+      <div id="rev-title"></div>
+      <div id="rev-artist"></div>
+      <div id="gm-sub"></div>
+    </div>
+    <div id="gbtns">
+      <button id="b-reveal">RÉVÉLER</button>
+      <button id="b-fail">✘ RATÉ</button>
+      <button id="b-good">✔ TROUVÉ</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============ PLAYLISTS — codées en dur (artiste, titre) ============ */
+var PL_RAPFR = [
+["Booba","DKR"],["Booba","Validée"],["Booba","92i Veyron"],["SCH","A7"],["SCH","Champs-Élysées"],
+["Damso","Macarena"],["Damso","Θ. Macarena"],["Damso","911"],["Kaaris","Or Noir"],["Kaaris","Tchoin"],
+["Jul","Tchikita"],["Jul","My World"],["Hamza","Fade Up"],["Hamza","Godzilla"],["Niska","Réseaux"],
+["Niska","Salé"],["PNL","Ah bon?"],["PNL","Au DD"],["PNL","Naha"],["Nekfeu","On verra"],
+["Nekfeu","Nique les clones"],["Alpha Wann","Stupéfiant noir"],["Ninho","Lettre à une femme"],["Ninho","Goutte d'eau"],
+["Gazo","BODIES"],["Gazo","CELINE 3x"],["Freeze Corleone","Freeze Raël"],["Laylow","TRINITYVILLE"],
+["Vald","Désaccordé"],["Lomepal","Yeux disent"]];
+var PL_CLASSICS = [
+["The Notorious B.I.G.","Juicy"],["2Pac","California Love"],["Dr. Dre","Still D.R.E."],["Snoop Dogg","Gin And Juice"],
+["Eminem","Lose Yourself"],["Eminem","Stan"],["50 Cent","In Da Club"],["Jay-Z","99 Problems"],
+["Nas","N.Y. State of Mind"],["Wu-Tang Clan","C.R.E.A.M."],["Mobb Deep","Shook Ones, Pt. II"],
+["Kanye West","Stronger"],["Kanye West","Gold Digger"],["Kendrick Lamar","HUMBLE."],["Kendrick Lamar","Alright"],
+["OutKast","Ms. Jackson"],["Missy Elliott","Work It"],["Lil Wayne","A Milli"],["T.I.","Whatever You Like"],
+["The Game","Hate It Or Love It"],["Rick Ross","Hustlin'"],["Drake","Started From the Bottom"],
+["J. Cole","No Role Modelz"],["A$AP Rocky","Praise the Lord (Da Shine)"],["Travis Scott","SICKO MODE"],
+["Skepta","Shutdown"],["Stormzy","Vossi Bop"],["Dizzee Rascal","Bonkers"],["MIA","Paper Planes"],
+["House Of Pain","Jump Around"]];
+var PL_RECENT = [
+["Gazo","MOLLY"],["Werenoi","Guadalajara"],["SDM","Bolide allemand"],["Ninho","Jefe"],
+["Tiakola","Meuda"],["Gazo","Tchop"],["Josman","Intro"],["Damso","BPM"],
+["SCH","Marché noir"],["Naps","Best Life"],["Soso Maness","Zumba Cafew"],["PLK","Petrouchka"],
+["Zola","Papers"],["Koba LaD","RR 9.1"],["Fresh","Chop"],["Guy2Bezbar","Cœur"],
+["Favé","Mobbin"],["Jul","Coup de genou"],["Central Cee","Doja"],["Central Cee","Sprinter"],
+["Drake","First Person Shooter"],["21 Savage","redrum"],["Ice Spice","Munch"],["Doja Cat","Paint The Town Red"],
+["Travis Scott","FE!N"],["Metro Boomin","Creepin'"],["Lil Baby","California Breeze"],["Burna Boy","Last Last"],
+["Tyler, The Creator","EARFQUAKE"],["Kendrick Lamar","Not Like Us"]];
+
+var PLAYLISTS = [
+  { id: 'rapfr', name: 'Rap FR 2010s', tracks: PL_RAPFR },
+  { id: 'classics', name: 'Classiques US/UK', tracks: PL_CLASSICS },
+  { id: 'recent', name: 'Sorties récentes', tracks: PL_RECENT }
+];
+
+var LSK = 'bt_stats';
+function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+var stats = load(LSK, {});   // stats[plId] = {good, fail}
+
+var sel = 0, duel = false, screen = 'menu';
+var pl = null, order = [], oi = 0, phase = 'idle';   // idle | loading | playing | revealed
+var audio = null, current = null;
+var duelScores = [0, 0], duelTurn = 0, duelRounds = 0, DUEL_MAX = 10;
+
+var $ = function(id) { return document.getElementById(id); };
+function esc(s) { return String(s).replace(/[&<>"]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+/* ---------------- menu ---------------- */
+function renderMenu() {
+  var total = { g: 0, f: 0 };
+  Object.keys(stats).forEach(function(k) { total.g += stats[k].good; total.f += stats[k].fail; });
+  $('m-score').textContent = (total.g + total.f) ? '✔' + total.g + ' ✘' + total.f : '';
+  $('pl-list').innerHTML = PLAYLISTS.map(function(p, i) {
+    var st = stats[p.id];
+    return '<div class="pl-row' + (i === sel ? ' sel' : '') + '" data-i="' + i + '">' +
+      '<span class="n">' + p.name + '</span>' +
+      '<span class="d">' + p.tracks.length + ' titres' + (st ? ' · ✔' + st.good : '') + '</span></div>';
+  }).join('');
+  var dt = $('duel-toggle');
+  dt.textContent = 'MODE DUEL : ' + (duel ? 'ON — 2 joueurs, ' + DUEL_MAX + ' manches' : 'OFF');
+  dt.classList.toggle('on', duel);
+}
+
+/* ---------------- jeu ---------------- */
+function startGame() {
+  pl = PLAYLISTS[sel];
+  order = pl.tracks.map(function(_, i) { return i; }).sort(function() { return Math.random() - 0.5; });
+  oi = 0;
+  duelScores = [0, 0]; duelTurn = 0; duelRounds = 0;
+  screen = 'game';
+  $('menu').classList.remove('visible');
+  $('game').classList.add('visible');
+  $('g-pl').textContent = pl.name.toUpperCase();
+  $('duel-bar').style.display = duel ? 'flex' : 'none';
+  nextRound();
+}
+function backToMenu() {
+  stopAudio();
+  screen = 'menu';
+  $('game').classList.remove('visible');
+  $('menu').classList.add('visible');
+  renderMenu();
+}
+function stopAudio() { if (audio) { try { audio.pause(); } catch (e) {} audio = null; } }
+
+function setUi(status, sub) {
+  $('gm-status').textContent = status;
+  $('gm-sub').innerHTML = sub || '';
+}
+function renderScore() {
+  if (duel) {
+    $('d1').textContent = 'J1 : ' + duelScores[0];
+    $('d2').textContent = 'J2 : ' + duelScores[1];
+    $('d1').classList.toggle('turn', duelTurn === 0);
+    $('d2').classList.toggle('turn', duelTurn === 1);
+    $('g-score').textContent = 'manche ' + Math.min(duelRounds + 1, DUEL_MAX) + '/' + DUEL_MAX;
+  } else {
+    var st = stats[pl.id] || { good: 0, fail: 0 };
+    $('g-score').textContent = '✔' + st.good + ' ✘' + st.fail;
+  }
+}
+
+function nextRound() {
+  stopAudio();
+  if (duel && duelRounds >= DUEL_MAX) { endDuel(); return; }
+  if (oi >= order.length) { order.sort(function() { return Math.random() - 0.5; }); oi = 0; }
+  var t = pl.tracks[order[oi]];
+  oi++;
+  phase = 'loading';
+  current = null;
+  $('err').classList.remove('visible');
+  $('art').style.display = 'none';
+  $('vinyl').style.display = '';
+  $('vinyl').classList.remove('spin');
+  $('rev-title').textContent = ''; $('rev-artist').textContent = '';
+  $('b-reveal').style.display = ''; $('b-fail').style.display = 'none'; $('b-good').style.display = 'none';
+  $('b-reveal').textContent = '…';
+  setUi('Recherche…', duel ? 'Joueur ' + (duelTurn + 1) + ', prépare-toi' : '');
+  renderScore();
+
+  // iTunes Search : trouve l'extrait 30 s (CORS ouvert, sans clé)
+  var q = encodeURIComponent(t[0] + ' ' + t[1]);
+  fetch('https://itunes.apple.com/search?term=' + q + '&country=FR&media=music&entity=song&limit=5')
+    .then(function(r) { if (!r.ok) throw 0; return r.json(); })
+    .then(function(d) {
+      var results = (d.results || []).filter(function(x) { return x.previewUrl; });
+      if (!results.length) throw 0;
+      // meilleur match : artiste le plus proche
+      var best = results[0];
+      results.forEach(function(x) {
+        if (x.artistName.toLowerCase().indexOf(t[0].toLowerCase().split(' ')[0]) !== -1 && best !== x &&
+            best.artistName.toLowerCase().indexOf(t[0].toLowerCase().split(' ')[0]) === -1) best = x;
+      });
+      current = { artist: t[0], title: t[1], preview: best.previewUrl, art: (best.artworkUrl100 || '').replace('100x100', '200x200') };
+      playPreview();
+    })
+    .catch(function() {
+      // titre introuvable → on passe au suivant
+      $('err').textContent = 'Introuvable : ' + t[0] + ' — on passe';
+      $('err').classList.add('visible');
+      setTimeout(nextRound, 900);
+    });
+}
+
+function playPreview() {
+  phase = 'playing';
+  audio = new Audio(current.preview);
+  audio.play().then(function() {
+    $('vinyl').classList.add('spin');
+    setUi('Ça joue… 🎧', 'tap RÉVÉLER quand tu as trouvé<br>clic latéral = rejouer l\'extrait');
+    $('b-reveal').textContent = 'RÉVÉLER';
+  }).catch(function() {
+    // autoplay bloqué : demander un tap
+    setUi('Tap pour lancer l\'extrait ▶', '');
+    $('b-reveal').textContent = '▶ LECTURE';
+  });
+  audio.onended = function() { $('vinyl').classList.remove('spin'); };
+}
+
+function reveal() {
+  if (phase === 'loading') return;
+  if (phase === 'playing' && audio && audio.paused) { audio.play(); $('vinyl').classList.add('spin'); $('b-reveal').textContent = 'RÉVÉLER'; setUi('Ça joue… 🎧', ''); return; }
+  phase = 'revealed';
+  $('vinyl').style.display = 'none';
+  if (current.art) { $('art').src = current.art; $('art').style.display = ''; }
+  $('rev-title').textContent = current.title;
+  $('rev-artist').textContent = current.artist;
+  setUi('', duel ? 'Joueur ' + (duelTurn + 1) + ' : trouvé ?' : '');
+  $('b-reveal').style.display = 'none';
+  $('b-fail').style.display = ''; $('b-good').style.display = '';
+}
+
+function grade(good) {
+  if (phase !== 'revealed') return;
+  if (duel) {
+    if (good) duelScores[duelTurn]++;
+    duelTurn = 1 - duelTurn;
+    duelRounds++;
+  } else {
+    if (!stats[pl.id]) stats[pl.id] = { good: 0, fail: 0 };
+    stats[pl.id][good ? 'good' : 'fail']++;
+    save(LSK, stats);
+  }
+  nextRound();
+}
+
+function endDuel() {
+  stopAudio();
+  phase = 'idle';
+  $('vinyl').style.display = ''; $('vinyl').classList.remove('spin'); $('vinyl').textContent = '🏆';
+  $('art').style.display = 'none';
+  $('rev-title').textContent = ''; $('rev-artist').textContent = '';
+  var w = duelScores[0] === duelScores[1] ? 'Égalité !' : (duelScores[0] > duelScores[1] ? 'JOUEUR 1 gagne !' : 'JOUEUR 2 gagne !');
+  setUi(w, duelScores[0] + ' — ' + duelScores[1] + '<br>tap = retour au menu');
+  $('b-reveal').style.display = 'none'; $('b-fail').style.display = 'none'; $('b-good').style.display = 'none';
+  renderScore();
+}
+
+/* ---------------- contrôles ---------------- */
+$('pl-list').addEventListener('pointerup', function(e) {
+  var row = e.target.closest('.pl-row');
+  if (!row) return;
+  var i = parseInt(row.dataset.i, 10);
+  if (i === sel) startGame(); else { sel = i; renderMenu(); }
+});
+$('duel-toggle').addEventListener('pointerup', function() { duel = !duel; renderMenu(); });
+$('b-reveal').addEventListener('pointerup', reveal);
+$('b-fail').addEventListener('pointerup', function() { grade(false); });
+$('b-good').addEventListener('pointerup', function() { grade(true); });
+$('game-mid').addEventListener('pointerup', function() {
+  if (phase === 'idle') backToMenu();               // fin de duel
+  else if (phase === 'playing') reveal();
+});
+
+window.addEventListener('scrollUp', function() {
+  if (screen === 'menu') { sel = Math.max(0, sel - 1); renderMenu(); }
+});
+window.addEventListener('scrollDown', function() {
+  if (screen === 'menu') { sel = Math.min(PLAYLISTS.length - 1, sel + 1); renderMenu(); }
+});
+window.addEventListener('sideClick', function() {
+  if (screen === 'menu') startGame();
+  else if (phase === 'playing' && audio) { audio.currentTime = 0; audio.play(); }   // rejouer l'extrait
+  else if (phase === 'revealed' || phase === 'idle') backToMenu();
+});
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+  if (e.key === ' ')         { if (screen === 'menu') startGame(); else reveal(); }
+  if (e.key === '1') grade(false);
+  if (e.key === '2') grade(true);
+});
+
+renderMenu();
+</script>
+</body>
+</html>

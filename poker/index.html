@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Poker vs IA</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; position: relative; }
+
+/* Bots */
+#bots { flex: 0 0 auto; display: flex; gap: 4px; padding: 5px 6px 3px 6px; }
+.bot {
+  flex: 1; border-radius: 6px; padding: 3px 5px; background: rgba(255,255,255,0.05);
+  font-size: 9px; line-height: 1.35;
+}
+.bot.turn { outline: 1px solid #34D399; background: rgba(52,211,153,0.10); }
+.bot.folded { opacity: 0.35; }
+.bot .bn { font-weight: 800; font-size: 10px; }
+.bot .bs { color: rgba(255,255,255,0.6); font-variant-numeric: tabular-nums; }
+.bot .ba { color: #FACC15; font-weight: 700; min-height: 12px; }
+.bot .bc { letter-spacing: 1px; }
+
+/* Board */
+#mid { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+#board { display: flex; gap: 4px; min-height: 34px; }
+.card {
+  width: 24px; height: 34px; border-radius: 3px; background: #f5f5f0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 11px; line-height: 1.05; color: #111;
+}
+.card.r { color: #c0392b; }
+.card.back { background: repeating-linear-gradient(45deg, #1e3a8a, #1e3a8a 3px, #172c6b 3px, #172c6b 6px); }
+.card.empty { background: rgba(255,255,255,0.06); }
+#pot { font-size: 12px; font-weight: 800; color: #FACC15; font-variant-numeric: tabular-nums; }
+#msg { font-size: 11px; font-weight: 700; text-align: center; min-height: 15px; padding: 0 8px; color: rgba(255,255,255,0.85); }
+#msg .green { color: #4ade80; } #msg .red { color: #f87171; }
+
+/* Moi */
+#me { flex: 0 0 auto; padding: 3px 8px 6px 8px; border-top: 1px solid rgba(255,255,255,0.1); }
+#me-top { display: flex; align-items: center; gap: 6px; }
+#my-cards { display: flex; gap: 4px; }
+#my-info { margin-left: auto; text-align: right; font-size: 10px; line-height: 1.4; }
+#my-stack { font-weight: 800; font-size: 13px; color: #34D399; font-variant-numeric: tabular-nums; }
+#my-bet { color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums; }
+#acts { display: flex; gap: 5px; margin-top: 5px; }
+.abtn {
+  flex: 1; padding: 9px 0; border-radius: 6px; border: none;
+  font-size: 11px; font-weight: 800; font-family: inherit;
+  background: rgba(255,255,255,0.10); color: #fff;
+}
+.abtn.off { opacity: 0.25; }
+#a-fold  { background: rgba(248,113,113,0.2); color: #f87171; }
+#a-call  { background: rgba(52,211,153,0.2); color: #34D399; }
+#a-raise { background: rgba(250,204,21,0.2); color: #FACC15; }
+
+#hint { font-size: 8px; color: rgba(255,255,255,0.3); text-align: center; margin-top: 3px; }
+
+.overlay {
+  display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(14,14,16,0.94); z-index: 50;
+  flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 14px;
+}
+.overlay.visible { display: flex; }
+.obtn { padding: 9px 20px; border-radius: 7px; border: none; font-size: 12px; font-weight: 800; font-family: inherit; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bots"></div>
+  <div id="mid">
+    <div id="pot"></div>
+    <div id="board"></div>
+    <div id="msg"></div>
+  </div>
+  <div id="me">
+    <div id="me-top">
+      <div id="my-cards"></div>
+      <div id="my-info">
+        <div id="my-stack"></div>
+        <div id="my-bet"></div>
+      </div>
+    </div>
+    <div id="acts">
+      <button class="abtn" id="a-fold">FOLD</button>
+      <button class="abtn" id="a-call">CALL</button>
+      <button class="abtn" id="a-raise">RAISE</button>
+    </div>
+    <div id="hint">molette = taille de relance · appui long sur ton stack = reset · clic latéral = check/call</div>
+  </div>
+
+  <div class="overlay" id="reset-ov">
+    <div style="font-size:14px;font-weight:800">Reprendre avec 1 000 $ ?</div>
+    <div style="font-size:10px;color:rgba(255,255,255,0.4)">Blinds croissantes : <span id="rs-blinds">NON</span> (tap pour changer)</div>
+    <div style="display:flex;gap:10px">
+      <button class="obtn" id="rs-yes" style="background:#34D399;color:#0e0e10">OUI</button>
+      <button class="obtn" id="rs-no" style="background:rgba(255,255,255,0.12);color:#fff">NON</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* =========================================================
+   POKER VS IA — Texas Hold'em No-Limit, 4 joueurs, offline.
+   Bankroll pk_ (séparée du blackjack). Bots à personnalités :
+   - Rocky (rock)  : joue très peu de mains, mise fort quand il a du jeu
+   - Léo   (LAG)   : joue large et agressif, bluffe souvent
+   - Momo  (fish)  : paie tout, relance rarement
+   ========================================================= */
+var LSK = { bank: 'pk_bank', opts: 'pk_opts', stats: 'pk_stats' };
+function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+var bank  = load(LSK.bank, 1000);
+var opts  = load(LSK.opts, { risingBlinds: false });
+var stats = load(LSK.stats, { hands: 0, won: 0 });
+
+var SUITS = ['♠', '♥', '♦', '♣'];
+var RANKS = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];  // valeur = index+2
+function rankTxt(r) { return r === 'T' ? '10' : r; }
+
+/* ---------- personnalités (lisibles) ----------
+   playPct   : % des mains de départ jouées (préflop)
+   aggro     : probabilité de relancer plutôt que suivre quand il a du jeu
+   bluff     : probabilité de miser sans rien
+   callDown  : tolérance à payer avec une main moyenne (0-1)          */
+var PERSOS = {
+  rock: { name: 'Rocky', playPct: 0.18, aggro: 0.75, bluff: 0.03, callDown: 0.25 },
+  lag:  { name: 'Léo',   playPct: 0.55, aggro: 0.70, bluff: 0.25, callDown: 0.55 },
+  fish: { name: 'Momo',  playPct: 0.75, aggro: 0.10, bluff: 0.05, callDown: 0.95 }
+};
+
+var SB = 5, BB = 10;
+var G = null;     // état de la main en cours
+
+/* ---------- deck / éval ---------- */
+function newDeck() {
+  var d = [];
+  for (var s = 0; s < 4; s++) for (var r = 0; r < 13; r++) d.push({ r: r + 2, s: s });
+  for (var i = d.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = d[i]; d[i] = d[j]; d[j] = t; }
+  return d;
+}
+/* score5 : [catégorie, kickers...] — comparaison lexicographique.
+   8=quinte flush 7=carré 6=full 5=couleur 4=quinte 3=brelan 2=deux paires 1=paire 0=hauteur */
+function score5(cs) {
+  var rs = cs.map(function(c) { return c.r; }).sort(function(a, b) { return b - a; });
+  var flush = cs.every(function(c) { return c.s === cs[0].s; });
+  var uniq = rs.filter(function(v, i) { return rs.indexOf(v) === i; });
+  var straightHi = 0;
+  if (uniq.length === 5) {
+    if (uniq[0] - uniq[4] === 4) straightHi = uniq[0];
+    else if (uniq[0] === 14 && uniq[1] === 5 && uniq[4] === 2) straightHi = 5;  // roue A-5
+  }
+  var counts = {};
+  rs.forEach(function(r) { counts[r] = (counts[r] || 0) + 1; });
+  var groups = Object.keys(counts).map(function(r) { return [counts[r], parseInt(r, 10)]; })
+    .sort(function(a, b) { return b[0] - a[0] || b[1] - a[1]; });
+  if (flush && straightHi) return [8, straightHi];
+  if (groups[0][0] === 4) return [7, groups[0][1], groups[1][1]];
+  if (groups[0][0] === 3 && groups[1][0] === 2) return [6, groups[0][1], groups[1][1]];
+  if (flush) return [5].concat(rs);
+  if (straightHi) return [4, straightHi];
+  if (groups[0][0] === 3) return [3, groups[0][1], groups[1][1], groups[2][1]];
+  if (groups[0][0] === 2 && groups[1][0] === 2) return [2, groups[0][1], groups[1][1], groups[2][1]];
+  if (groups[0][0] === 2) return [1, groups[0][1], groups[1][1], groups[2][1], groups[3][1]];
+  return [0].concat(rs);
+}
+function cmpScore(a, b) {
+  for (var i = 0; i < Math.max(a.length, b.length); i++) {
+    var x = a[i] || 0, y = b[i] || 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+function best7(cards) {  // meilleure main de 5 cartes parmi 5, 6 ou 7
+  var n = cards.length;
+  if (n === 5) return score5(cards);
+  var best = null, i, j;
+  if (n === 6) {
+    for (i = 0; i < 6; i++) {
+      var five6 = cards.filter(function(_, k) { return k !== i; });
+      var sc6 = score5(five6);
+      if (!best || cmpScore(sc6, best) > 0) best = sc6;
+    }
+    return best;
+  }
+  for (i = 0; i < 7; i++) for (j = i + 1; j < 7; j++) {
+    var five = cards.filter(function(_, k) { return k !== i && k !== j; });
+    var sc = score5(five);
+    if (!best || cmpScore(sc, best) > 0) best = sc;
+  }
+  return best;
+}
+var CAT_NAMES = ['hauteur', 'paire', 'deux paires', 'brelan', 'quinte', 'couleur', 'full', 'carré', 'quinte flush'];
+
+/* ---------- force de main pour les bots ---------- */
+function preflopStrength(cards) {  // 0..1 approx (type Chen simplifié)
+  var a = cards[0].r, b = cards[1].r;
+  var hi = Math.max(a, b), lo = Math.min(a, b);
+  var s = hi / 14 * 0.6;
+  if (a === b) s += 0.35 + hi / 14 * 0.15;             // paires
+  if (cards[0].s === cards[1].s) s += 0.06;            // assorties
+  var gap = hi - lo;
+  if (gap === 1) s += 0.05; else if (gap > 3) s -= 0.08;
+  return Math.min(1, Math.max(0, s));
+}
+function postflopStrength(p) {     // force de la main faite, 0..1
+  var sc = best7(p.cards.concat(G.board.filter(Boolean)));
+  var cat = sc[0];
+  return Math.min(1, cat / 6 + sc[1] / 14 * 0.12);
+}
+
+/* ---------- état de la main ---------- */
+function newHand() {
+  var lvl = opts.risingBlinds ? Math.floor(stats.hands / 10) : 0;
+  var sb = SB * Math.pow(2, Math.min(4, lvl)), bb = sb * 2;
+  var deck = newDeck();
+  var players = G ? G.players : null;
+  if (!players) {
+    players = [
+      { id: 0, name: 'Toi', me: true, stack: bank },
+      { id: 1, perso: PERSOS.rock, name: PERSOS.rock.name, stack: 1000 },
+      { id: 2, perso: PERSOS.lag,  name: PERSOS.lag.name,  stack: 1000 },
+      { id: 3, perso: PERSOS.fish, name: PERSOS.fish.name, stack: 1000 }
+    ];
+  }
+  players.forEach(function(p) {
+    if (!p.me && p.stack < bb * 5) p.stack = 1000;   // les bots recavent
+    p.cards = [deck.pop(), deck.pop()];
+    p.bet = 0; p.total = 0; p.folded = false; p.allin = false; p.acted = false; p.action = '';
+  });
+  G = {
+    players: players, deck: deck, board: [],
+    btn: G ? (G.btn + 1) % 4 : 0,
+    pot: 0, toCall: 0, minRaise: bb, street: 0,  // 0 préflop 1 flop 2 turn 3 river
+    sb: sb, bb: bb, over: false, raiseAmt: bb * 2
+  };
+  postBlind((G.btn + 1) % 4, sb, 'SB');
+  postBlind((G.btn + 2) % 4, bb, 'BB');
+  G.toCall = bb;
+  G.turn = (G.btn + 3) % 4;
+  setMsg('Blinds ' + sb + '/' + bb);
+  render();
+  advance();
+}
+function postBlind(i, amt, lbl) {
+  var p = G.players[i];
+  var a = Math.min(amt, p.stack);
+  p.stack -= a; p.bet = a; p.total += a; G.pot += a;
+  if (p.stack === 0) p.allin = true;
+  p.action = lbl + ' ' + a;
+}
+
+function alive() { return G.players.filter(function(p) { return !p.folded; }); }
+function canAct() { return G.players.filter(function(p) { return !p.folded && !p.allin; }); }
+
+/* ---------- déroulement ---------- */
+function advance() {
+  if (G.over) return;
+  if (alive().length === 1) { endHand(); return; }
+  // tour de mise terminé ? tout le monde a agi et égalisé
+  var open = canAct().filter(function(p) { return !p.acted || p.bet < G.toCall; });
+  if (open.length === 0 || (canAct().length <= 1 && everyoneMatched())) { nextStreet(); return; }
+  // trouver le prochain à parler
+  while (true) {
+    var p = G.players[G.turn];
+    if (!p.folded && !p.allin && (!p.acted || p.bet < G.toCall)) break;
+    G.turn = (G.turn + 1) % 4;
+  }
+  render();
+  var pl = G.players[G.turn];
+  if (pl.me) return;                       // attend l'humain
+  setTimeout(function() { botAct(pl); }, 550);
+}
+function everyoneMatched() {
+  return canAct().every(function(p) { return p.bet === G.toCall || p.allin; });
+}
+
+function nextStreet() {
+  G.players.forEach(function(p) { p.bet = 0; p.acted = false; if (!p.folded && !p.allin) p.action = ''; });
+  G.toCall = 0; G.minRaise = G.bb;
+  if (G.street === 0) { G.board = [G.deck.pop(), G.deck.pop(), G.deck.pop()]; G.street = 1; }
+  else if (G.street === 1) { G.board.push(G.deck.pop()); G.street = 2; }
+  else if (G.street === 2) { G.board.push(G.deck.pop()); G.street = 3; }
+  else { endHand(); return; }
+  // si plus personne ne peut agir → dérouler le board
+  G.turn = (G.btn + 1) % 4;
+  render();
+  if (canAct().length <= 1) { setTimeout(nextStreet, 700); return; }
+  advance();
+}
+
+/* ---------- actions ---------- */
+function doFold(p) { p.folded = true; p.action = 'fold'; p.acted = true; after(p); }
+function doCall(p) {
+  var need = Math.min(G.toCall - p.bet, p.stack);
+  p.stack -= need; p.bet += need; p.total += need; G.pot += need;
+  if (p.stack === 0) p.allin = true;
+  p.action = need === 0 ? 'check' : 'call ' + p.bet;
+  p.acted = true; after(p);
+}
+function doRaise(p, to) {   // to = mise totale visée sur ce tour
+  to = Math.min(to, p.bet + p.stack);
+  var add = to - p.bet;
+  p.stack -= add; p.bet = to; p.total += add; G.pot += add;
+  if (p.stack === 0) p.allin = true;
+  G.minRaise = Math.max(G.minRaise, to - G.toCall);
+  G.toCall = to;
+  G.players.forEach(function(q) { if (q !== p && !q.folded && !q.allin) q.acted = false; });
+  p.action = (p.allin ? 'ALL-IN ' : 'raise ') + to;
+  p.acted = true; after(p);
+}
+function after(p) {
+  if (p.me) { bank = p.stack + 0; }  // synchro affichage (le vrai save se fait en fin de main)
+  G.turn = (G.turn + 1) % 4;
+  render();
+  setTimeout(advance, 150);
+}
+
+/* ---------- décision des bots (logique volontairement lisible) ---------- */
+function botAct(p) {
+  if (G.over || p.folded || p.allin) { advance(); return; }
+  var per = p.perso;
+  var str = G.street === 0 ? preflopStrength(p.cards) : postflopStrength(p);
+  var need = G.toCall - p.bet;                       // ce qu'il faut payer
+  var potOdds = need > 0 ? need / (G.pot + need) : 0;
+  var r = Math.random();
+
+  // PRÉFLOP : joue-t-il cette main ?
+  if (G.street === 0 && need > 0 && str < (1 - per.playPct) * 0.62 && p.bet === 0 && r > per.callDown * 0.4) {
+    doFold(p); return;
+  }
+  // gros jeu → relance selon l'agressivité
+  if (str > 0.55 && r < per.aggro) {
+    var to = Math.min(p.bet + p.stack, Math.max(G.toCall + G.minRaise, Math.round(G.pot * 0.75 / 5) * 5));
+    doRaise(p, to); return;
+  }
+  // bluff occasionnel quand personne n'a misé
+  if (need === 0 && r < per.bluff) {
+    doRaise(p, Math.max(G.minRaise, Math.round(G.pot * 0.5 / 5) * 5)); return;
+  }
+  // payer ? le fish paie presque tout, le rock exige de la force
+  if (need === 0) { doCall(p); return; }             // check gratuit
+  if (str > 0.45 || r < per.callDown * (1 - potOdds) || need < G.bb) { doCall(p); return; }
+  doFold(p);
+}
+
+/* ---------- fin de main + side pots ---------- */
+function endHand() {
+  G.over = true;
+  var live = alive();
+  var winnersTxt = '';
+  if (live.length === 1) {
+    live[0].stack += G.pot;
+    winnersTxt = live[0].name + ' remporte ' + G.pot + ' $';
+  } else {
+    // side pots par niveaux de contribution
+    var levels = G.players.map(function(p) { return p.total; }).filter(function(v) { return v > 0; })
+      .sort(function(a, b) { return a - b; }).filter(function(v, i, a) { return a.indexOf(v) === i; });
+    var scores = {};
+    live.forEach(function(p) { scores[p.id] = best7(p.cards.concat(G.board)); });
+    var prev = 0, parts = [];
+    levels.forEach(function(lvl) {
+      var potPart = 0;
+      G.players.forEach(function(p) { potPart += Math.max(0, Math.min(p.total, lvl) - prev); });
+      var contenders = live.filter(function(p) { return p.total >= lvl; });
+      if (!contenders.length) contenders = live;
+      var best = null;
+      contenders.forEach(function(p) { if (!best || cmpScore(scores[p.id], scores[best.id]) > 0) best = p; });
+      var winners = contenders.filter(function(p) { return cmpScore(scores[p.id], scores[best.id]) === 0; });
+      var share = Math.floor(potPart / winners.length);
+      winners.forEach(function(w) { w.stack += share; });
+      winners[0].stack += potPart - share * winners.length;  // reste au premier
+      parts.push(winners.map(function(w) { return w.name; }).join('+') + ' ' + potPart + ' $');
+      prev = lvl;
+    });
+    var meSc = scores[0] ? ' (' + CAT_NAMES[scores[0][0]] + ')' : '';
+    winnersTxt = parts.join(' · ') + meSc;
+  }
+  var me = G.players[0];
+  var delta = me.stack - bank0;
+  stats.hands++;
+  if (delta > 0) stats.won++;
+  bank = me.stack;
+  save(LSK.bank, bank); save(LSK.stats, stats);
+  setMsg('<span class="' + (delta >= 0 ? 'green' : 'red') + '">' + (delta >= 0 ? '+' : '−') + Math.abs(delta) + ' $</span> · ' + winnersTxt + ' · tap = suivante');
+  render(true);
+}
+
+/* ---------- rendu ---------- */
+var $ = function(id) { return document.getElementById(id); };
+function cardHtml(c, hidden) {
+  if (!c) return '<div class="card empty"></div>';
+  if (hidden) return '<div class="card back"></div>';
+  var red = c.s === 1 || c.s === 2;
+  return '<div class="card' + (red ? ' r' : '') + '"><span>' + rankTxt(RANKS[c.r - 2]) + '</span><span>' + SUITS[c.s] + '</span></div>';
+}
+function setMsg(h) { $('msg').innerHTML = h; }
+function render(showdown) {
+  if (!G) return;
+  var bh = '';
+  G.players.slice(1).forEach(function(p) {
+    var cls = 'bot' + (G.turn === p.id && !G.over && !p.folded ? ' turn' : '') + (p.folded ? ' folded' : '');
+    var cards = G.over && showdown && !p.folded
+      ? '<span class="bc">' + rankTxt(RANKS[p.cards[0].r - 2]) + SUITS[p.cards[0].s] + ' ' + rankTxt(RANKS[p.cards[1].r - 2]) + SUITS[p.cards[1].s] + '</span>'
+      : (p.folded ? '—' : '🂠🂠');
+    bh += '<div class="' + cls + '"><div class="bn">' + p.name + (G.btn === p.id ? ' ⓓ' : '') + '</div>' +
+      '<div class="bs">' + p.stack + ' $</div><div class="bc">' + cards + '</div>' +
+      '<div class="ba">' + (p.action || '') + '</div></div>';
+  });
+  $('bots').innerHTML = bh;
+  var b = '';
+  for (var i = 0; i < 5; i++) b += cardHtml(G.board[i]);
+  $('board').innerHTML = b;
+  $('pot').textContent = 'POT ' + G.pot + ' $';
+  var me = G.players[0];
+  $('my-cards').innerHTML = cardHtml(me.cards[0]) + cardHtml(me.cards[1]);
+  $('my-stack').textContent = me.stack + ' $' + (G.btn === 0 ? ' ⓓ' : '');
+  $('my-bet').textContent = me.folded ? 'couché' : ('misé ' + me.bet + ' $');
+  var myTurn = G.turn === 0 && !G.over && !me.folded && !me.allin;
+  var need = G.toCall - me.bet;
+  $('a-fold').classList.toggle('off', !myTurn || need === 0);
+  $('a-call').classList.toggle('off', !myTurn);
+  $('a-raise').classList.toggle('off', !myTurn || me.stack <= need);
+  $('a-call').textContent = need > 0 ? 'CALL ' + Math.min(need, me.stack) : 'CHECK';
+  if (myTurn) {
+    var minTo = Math.min(G.toCall + G.minRaise, me.bet + me.stack);
+    if (G.raiseAmt < minTo || G.raiseAmt > me.bet + me.stack) G.raiseAmt = minTo;
+    $('a-raise').textContent = (G.raiseAmt >= me.bet + me.stack ? 'ALL-IN' : 'RAISE ' + G.raiseAmt);
+  } else {
+    $('a-raise').textContent = 'RAISE';
+  }
+}
+
+/* ---------- contrôles ---------- */
+var bank0 = bank;   // stack de départ de la main (pour le delta)
+function myTurnNow() { return G && G.turn === 0 && !G.over && !G.players[0].folded && !G.players[0].allin; }
+
+$('a-fold').addEventListener('pointerup', function() { if (myTurnNow() && G.toCall > G.players[0].bet) doFold(G.players[0]); });
+$('a-call').addEventListener('pointerup', function() { if (myTurnNow()) doCall(G.players[0]); });
+$('a-raise').addEventListener('pointerup', function() {
+  var me = G.players[0];
+  if (myTurnNow() && me.stack > G.toCall - me.bet) doRaise(me, G.raiseAmt);
+});
+$('mid').addEventListener('pointerup', function() { if (G && G.over) startHand(); });
+
+// Molette : taille de relance (mapping naturel : scrollUp = diminuer)
+function wheelRaise(dir) {
+  if (!myTurnNow()) { if (G && G.over) startHand(); return; }
+  var me = G.players[0];
+  var minTo = Math.min(G.toCall + G.minRaise, me.bet + me.stack);
+  var maxTo = me.bet + me.stack;
+  var step = Math.max(5, G.bb);
+  G.raiseAmt = Math.min(maxTo, Math.max(minTo, (G.raiseAmt || minTo) + dir * step));
+  render();
+}
+window.addEventListener('scrollUp',   function() { wheelRaise(-1); });
+window.addEventListener('scrollDown', function() { wheelRaise(1); });
+window.addEventListener('sideClick',  function() {
+  if ($('reset-ov').classList.contains('visible')) return;
+  if (G && G.over) { startHand(); return; }
+  if (myTurnNow()) doCall(G.players[0]);
+});
+
+// Reset caché : appui long sur mon stack
+(function() {
+  var t = null;
+  var el = $('my-info');
+  el.addEventListener('pointerdown', function() { t = setTimeout(function() { $('rs-blinds').textContent = opts.risingBlinds ? 'OUI' : 'NON'; $('reset-ov').classList.add('visible'); }, 700); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev) { el.addEventListener(ev, function() { clearTimeout(t); }); });
+})();
+$('rs-blinds').parentElement.addEventListener('pointerup', function() {
+  opts.risingBlinds = !opts.risingBlinds; save(LSK.opts, opts);
+  $('rs-blinds').textContent = opts.risingBlinds ? 'OUI' : 'NON';
+});
+$('rs-yes').addEventListener('pointerup', function() {
+  bank = 1000; stats = { hands: 0, won: 0 };
+  save(LSK.bank, bank); save(LSK.stats, stats);
+  G = null; $('reset-ov').classList.remove('visible');
+  startHand();
+});
+$('rs-no').addEventListener('pointerup', function() { $('reset-ov').classList.remove('visible'); });
+
+function startHand() {
+  if (bank < BB * 2) { setMsg('Plus de jetons — appui long sur ton stack pour recaver'); return; }
+  if (G) G.players[0].stack = bank;
+  bank0 = bank;
+  newHand();
+}
+
+// Fallbacks clavier desktop
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+  if (e.key === 'f') $('a-fold').dispatchEvent(new PointerEvent('pointerup'));
+  if (e.key === 'c') $('a-call').dispatchEvent(new PointerEvent('pointerup'));
+  if (e.key === 'r') $('a-raise').dispatchEvent(new PointerEvent('pointerup'));
+  if (e.key === 'Enter' && G && G.over) startHand();
+});
+
+startHand();
+</script>
+</body>
+</html>

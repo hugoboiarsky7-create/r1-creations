@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Flashcards JP/KR</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; position: relative; }
+.screen { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; flex-direction: column; }
+.screen.visible { display: flex; }
+
+/* Choix du paquet */
+#decks-hdr { flex: 0 0 auto; display: flex; align-items: baseline; padding: 8px 10px 5px 10px; }
+#decks-hdr .t { font-size: 13px; font-weight: 800; color: #C084FC; letter-spacing: 0.5px; }
+#fire { margin-left: auto; font-size: 12px; font-weight: 800; }
+.deck {
+  margin: 3px 10px; padding: 8px 10px; border-radius: 7px; background: rgba(255,255,255,0.05);
+  display: flex; align-items: baseline; gap: 6px;
+}
+.deck.sel { background: rgba(192,132,252,0.12); outline: 1px solid rgba(192,132,252,0.5); }
+.deck .dn { font-size: 13px; font-weight: 800; }
+.deck .dd { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.45); font-variant-numeric: tabular-nums; }
+#decks-hint { margin-top: auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center; padding: 5px; border-top: 1px solid rgba(255,255,255,0.08); }
+
+/* Étude */
+#study-hdr { flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px; padding: 7px 10px 3px 10px; }
+#study-hdr .t { font-size: 11px; font-weight: 800; color: #C084FC; }
+#counter { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.45); font-variant-numeric: tabular-nums; }
+#card {
+  flex: 1 1 auto; margin: 4px 12px; border-radius: 10px; background: rgba(255,255,255,0.05);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px; text-align: center;
+}
+#card.flipped { background: rgba(192,132,252,0.10); }
+#c-front { font-size: 30px; font-weight: 800; line-height: 1.25; }
+#c-front.small { font-size: 17px; }
+#c-back { font-size: 21px; font-weight: 800; color: #C084FC; line-height: 1.3; }
+#c-back.small { font-size: 15px; }
+#c-roma { font-size: 12px; color: rgba(255,255,255,0.55); }
+#c-hint { font-size: 10px; color: rgba(255,255,255,0.3); }
+#grade { flex: 0 0 auto; display: none; gap: 6px; padding: 4px 10px 8px 10px; }
+#grade.visible { display: flex; }
+#grade button { flex: 1; padding: 11px 0; border-radius: 7px; border: none; font-size: 13px; font-weight: 800; font-family: inherit; }
+#g-fail { background: rgba(248,113,113,0.22); color: #f87171; }
+#g-good { background: rgba(74,222,128,0.22); color: #4ade80; }
+#study-hint { flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center; padding: 0 5px 6px 5px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="screen visible" id="decks">
+    <div id="decks-hdr"><span class="t">FLASHCARDS</span><span id="fire"></span></div>
+    <div id="deck-list"></div>
+    <div id="decks-hint">molette = choisir · tap ou clic latéral = étudier</div>
+  </div>
+
+  <div class="screen" id="study">
+    <div id="study-hdr"><span class="t" id="s-deck"></span><span id="counter"></span></div>
+    <div id="card">
+      <div id="c-front"></div>
+      <div id="c-back"></div>
+      <div id="c-roma"></div>
+      <div id="c-hint">tap = retourner</div>
+    </div>
+    <div id="grade">
+      <button id="g-fail">✘ RATÉ</button>
+      <button id="g-good">✔ BON</button>
+    </div>
+    <div id="study-hint">tap = retourner · molette = passer · clic latéral = retour</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============ DATA — générée en dur, aucune API ============
+   Format carte : [recto, verso, romanisation]                */
+var HIRAGANA = [
+["あ","a",""],["い","i",""],["う","u",""],["え","e",""],["お","o",""],
+["か","ka",""],["き","ki",""],["く","ku",""],["け","ke",""],["こ","ko",""],
+["さ","sa",""],["し","shi",""],["す","su",""],["せ","se",""],["そ","so",""],
+["た","ta",""],["ち","chi",""],["つ","tsu",""],["て","te",""],["と","to",""],
+["な","na",""],["に","ni",""],["ぬ","nu",""],["ね","ne",""],["の","no",""],
+["は","ha",""],["ひ","hi",""],["ふ","fu",""],["へ","he",""],["ほ","ho",""],
+["ま","ma",""],["み","mi",""],["む","mu",""],["め","me",""],["も","mo",""],
+["や","ya",""],["ゆ","yu",""],["よ","yo",""],
+["ら","ra",""],["り","ri",""],["る","ru",""],["れ","re",""],["ろ","ro",""],
+["わ","wa",""],["を","wo",""],["ん","n",""]];
+var KATAKANA = [
+["ア","a",""],["イ","i",""],["ウ","u",""],["エ","e",""],["オ","o",""],
+["カ","ka",""],["キ","ki",""],["ク","ku",""],["ケ","ke",""],["コ","ko",""],
+["サ","sa",""],["シ","shi",""],["ス","su",""],["セ","se",""],["ソ","so",""],
+["タ","ta",""],["チ","chi",""],["ツ","tsu",""],["テ","te",""],["ト","to",""],
+["ナ","na",""],["ニ","ni",""],["ヌ","nu",""],["ネ","ne",""],["ノ","no",""],
+["ハ","ha",""],["ヒ","hi",""],["フ","fu",""],["ヘ","he",""],["ホ","ho",""],
+["マ","ma",""],["ミ","mi",""],["ム","mu",""],["メ","me",""],["モ","mo",""],
+["ヤ","ya",""],["ユ","yu",""],["ヨ","yo",""],
+["ラ","ra",""],["リ","ri",""],["ル","ru",""],["レ","re",""],["ロ","ro",""],
+["ワ","wa",""],["ヲ","wo",""],["ン","n",""]];
+var HANGUL = [
+["ㄱ","g / k",""],["ㄴ","n",""],["ㄷ","d / t",""],["ㄹ","r / l",""],["ㅁ","m",""],
+["ㅂ","b / p",""],["ㅅ","s",""],["ㅇ","muet / ng",""],["ㅈ","j",""],["ㅊ","ch",""],
+["ㅋ","k",""],["ㅌ","t",""],["ㅍ","p",""],["ㅎ","h",""],
+["ㄲ","kk",""],["ㄸ","tt",""],["ㅃ","pp",""],["ㅆ","ss",""],["ㅉ","jj",""],
+["ㅏ","a",""],["ㅑ","ya",""],["ㅓ","eo",""],["ㅕ","yeo",""],["ㅗ","o",""],
+["ㅛ","yo",""],["ㅜ","u",""],["ㅠ","yu",""],["ㅡ","eu",""],["ㅣ","i",""],
+["ㅐ","ae",""],["ㅔ","e",""],["ㅘ","wa",""],["ㅝ","wo",""],["ㅟ","wi",""],["ㅢ","ui",""],
+["안","an (ㅇ+ㅏ+ㄴ)",""],["녕","nyeong",""],["하","ha",""],["국","guk",""],["밥","bap",""]];
+var PHRASES_JP = [
+["Bonjour","こんにちは","konnichiwa"],["Bonjour (matin)","おはようございます","ohayō gozaimasu"],
+["Bonsoir","こんばんは","konbanwa"],["Au revoir","さようなら","sayōnara"],
+["Merci","ありがとうございます","arigatō gozaimasu"],["De rien","どういたしまして","dō itashimashite"],
+["S'il vous plaît","お願いします","onegai shimasu"],["Excusez-moi / pardon","すみません","sumimasen"],
+["Oui","はい","hai"],["Non","いいえ","iie"],
+["Je ne comprends pas","わかりません","wakarimasen"],["Parlez-vous anglais ?","英語を話せますか","eigo o hanasemasu ka"],
+["Je ne parle pas japonais","日本語が話せません","nihongo ga hanasemasen"],
+["Comment ça va ?","お元気ですか","o-genki desu ka"],["Ça va bien","元気です","genki desu"],
+["Je m'appelle…","…と申します","… to mōshimasu"],["Enchanté","はじめまして","hajimemashite"],
+["C'est combien ?","いくらですか","ikura desu ka"],["C'est trop cher","高すぎます","takasugimasu"],
+["L'addition, s'il vous plaît","お会計お願いします","o-kaikei onegai shimasu"],
+["Je voudrais ça","これをください","kore o kudasai"],["Ça, c'est quoi ?","これは何ですか","kore wa nan desu ka"],
+["C'est délicieux","おいしいです","oishii desu"],["Bon appétit (avant)","いただきます","itadakimasu"],
+["Merci pour le repas","ごちそうさまでした","gochisōsama deshita"],
+["De l'eau, s'il vous plaît","お水をください","o-mizu o kudasai"],
+["Une bière, s'il vous plaît","ビールをください","bīru o kudasai"],
+["Sans viande","肉なしで","niku nashi de"],["Je suis allergique à…","…アレルギーがあります","… arerugī ga arimasu"],
+["Où sont les toilettes ?","トイレはどこですか","toire wa doko desu ka"],
+["Où est la gare ?","駅はどこですか","eki wa doko desu ka"],
+["Où est… ?","…はどこですか","… wa doko desu ka"],["À gauche","左","hidari"],["À droite","右","migi"],
+["Tout droit","まっすぐ","massugu"],["Ici","ここ","koko"],["Là-bas","あそこ","asoko"],
+["Le train","電車","densha"],["Le métro","地下鉄","chikatetsu"],["Un billet pour…","…までの切符","… made no kippu"],
+["Ça part à quelle heure ?","何時に出発しますか","nanji ni shuppatsu shimasu ka"],
+["Aidez-moi !","助けて","tasukete"],["Appelez une ambulance","救急車を呼んでください","kyūkyūsha o yonde kudasai"],
+["Je suis perdu","道に迷いました","michi ni mayoimashita"],["Un hôpital","病院","byōin"],
+["La police","警察","keisatsu"],["J'ai mal ici","ここが痛いです","koko ga itai desu"],
+["Une chambre pour ce soir","今晩部屋はありますか","konban heya wa arimasu ka"],
+["J'ai une réservation","予約しています","yoyaku shite imasu"],
+["Le wifi, s'il vous plaît","Wi-Fiはありますか","waifai wa arimasu ka"],
+["Un","一","ichi"],["Deux","二","ni"],["Trois","三","san"],["Quatre","四","yon"],["Cinq","五","go"],
+["Six","六","roku"],["Sept","七","nana"],["Huit","八","hachi"],["Neuf","九","kyū"],["Dix","十","jū"],
+["Cent","百","hyaku"],["Mille","千","sen"],["Dix mille","万","man"],
+["Aujourd'hui","今日","kyō"],["Demain","明日","ashita"],["Hier","昨日","kinō"],
+["Maintenant","今","ima"],["Attendez un instant","ちょっと待ってください","chotto matte kudasai"],
+["C'est bon / OK","大丈夫です","daijōbu desu"],["Pas de problème","問題ありません","mondai arimasen"],
+["Santé ! (trinquer)","乾杯","kanpai"],["Konbini (supérette)","コンビニ","konbini"],
+["Consigne à bagages","コインロッカー","koin rokkā"],["Combien de temps ?","どのくらいかかりますか","dono kurai kakarimasu ka"],
+["Puis-je payer par carte ?","カードで払えますか","kādo de haraemasu ka"]];
+var PHRASES_KR = [
+["Bonjour","안녕하세요","annyeonghaseyo"],["Au revoir (je pars)","안녕히 계세요","annyeonghi gyeseyo"],
+["Au revoir (vous partez)","안녕히 가세요","annyeonghi gaseyo"],
+["Merci","감사합니다","gamsahamnida"],["Merci (familier)","고마워요","gomawoyo"],
+["De rien","천만에요","cheonmaneyo"],["S'il vous plaît","주세요","juseyo"],
+["Excusez-moi / pardon","죄송합니다","joesonghamnida"],["Excusez-moi (interpeller)","저기요","jeogiyo"],
+["Oui","네","ne"],["Non","아니요","aniyo"],
+["Je ne comprends pas","이해가 안 돼요","ihaega an dwaeyo"],["Je ne parle pas coréen","한국어를 못해요","hangugeo-reul mothaeyo"],
+["Parlez-vous anglais ?","영어 하세요?","yeongeo haseyo?"],
+["Comment ça va ?","잘 지내세요?","jal jinaeseyo?"],["Ça va bien","잘 지내요","jal jinaeyo"],
+["Je m'appelle…","저는 …입니다","jeoneun … imnida"],["Enchanté","반갑습니다","bangapseumnida"],
+["C'est combien ?","얼마예요?","eolmayeyo?"],["C'est trop cher","너무 비싸요","neomu bissayo"],
+["Réduction, s'il vous plaît","깎아 주세요","kkakka juseyo"],
+["L'addition, s'il vous plaît","계산서 주세요","gyesanseo juseyo"],
+["Je voudrais ça","이거 주세요","igeo juseyo"],["C'est quoi ?","이게 뭐예요?","ige mwoyeyo?"],
+["C'est délicieux","맛있어요","masisseoyo"],["Bon appétit","잘 먹겠습니다","jal meokgetseumnida"],
+["J'ai bien mangé","잘 먹었습니다","jal meogeotseumnida"],
+["De l'eau, s'il vous plaît","물 주세요","mul juseyo"],
+["Une bière, s'il vous plaît","맥주 주세요","maekju juseyo"],["Un soju","소주 하나","soju hana"],
+["Pas épicé, s'il vous plaît","안 맵게 해 주세요","an maepge hae juseyo"],
+["Où sont les toilettes ?","화장실이 어디예요?","hwajangsiri eodiyeyo?"],
+["Où est la station de métro ?","지하철역이 어디예요?","jihacheollyeogi eodiyeyo?"],
+["Où est… ?","…이 어디예요?","… i eodiyeyo?"],["À gauche","왼쪽","oenjjok"],["À droite","오른쪽","oreunjjok"],
+["Tout droit","직진","jikjin"],["Ici","여기","yeogi"],["Là-bas","저기","jeogi"],
+["Le métro","지하철","jihacheol"],["Le bus","버스","beoseu"],["Un taxi","택시","taeksi"],
+["Un billet pour…","… 표 한 장","… pyo han jang"],
+["Aidez-moi !","도와주세요","dowajuseyo"],["Appelez la police","경찰을 불러 주세요","gyeongchareul bulleo juseyo"],
+["Je suis perdu","길을 잃었어요","gireul ireosseoyo"],["Un hôpital","병원","byeongwon"],
+["Une pharmacie","약국","yakguk"],["J'ai mal ici","여기가 아파요","yeogiga apayo"],
+["Une chambre pour ce soir","오늘 밤 방 있어요?","oneul bam bang isseoyo?"],
+["J'ai une réservation","예약했어요","yeyakhaesseoyo"],
+["Le wifi, s'il vous plaît","와이파이 있어요?","waipai isseoyo?"],
+["Un","하나","hana"],["Deux","둘","dul"],["Trois","셋","set"],["Quatre","넷","net"],["Cinq","다섯","daseot"],
+["Un (sino)","일","il"],["Deux (sino)","이","i"],["Trois (sino)","삼","sam"],["Dix","십","sip"],
+["Cent","백","baek"],["Mille","천","cheon"],["Dix mille","만","man"],
+["Aujourd'hui","오늘","oneul"],["Demain","내일","naeil"],["Hier","어제","eoje"],
+["Maintenant","지금","jigeum"],["Un instant","잠시만요","jamsimanyo"],
+["C'est bon / OK","괜찮아요","gwaenchanayo"],["Santé ! (trinquer)","건배","geonbae"],
+["Supérette","편의점","pyeonuijeom"],["Puis-je payer par carte ?","카드 돼요?","kadeu dwaeyo?"],
+["Combien de temps ?","얼마나 걸려요?","eolmana geollyeoyo?"]];
+
+var DECKS = [
+  { id: 'hira', name: 'Hiragana',      cards: HIRAGANA,  big: true },
+  { id: 'kata', name: 'Katakana',      cards: KATAKANA,  big: true },
+  { id: 'hang', name: 'Hangul',        cards: HANGUL,    big: true },
+  { id: 'pjp',  name: 'Phrases 🇯🇵',    cards: PHRASES_JP, big: false },
+  { id: 'pkr',  name: 'Phrases 🇰🇷',    cards: PHRASES_KR, big: false }
+];
+
+/* ============ SRS (Leitner) ============
+   box 0..4, intervalles en jours ; raté → box 0, bon → box+1 */
+var INTERVALS = [0, 1, 3, 7, 16];
+var LSK = { prog: 'fc_prog', streak: 'fc_streak', last: 'fc_last' };
+function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+var prog = load(LSK.prog, {});      // prog[deckId][cardIdx] = {b: box, d: due(ms)}
+var streak = load(LSK.streak, 0);
+var lastDay = load(LSK.last, null);
+
+var sel = 0, screen = 'decks';
+var deck = null, queue = [], qi = 0, flipped = false;
+
+var $ = function(id) { return document.getElementById(id); };
+function todayStr() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function yesterdayStr() { var d = new Date(Date.now() - 86400000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function checkStreakExpiry() {
+  if (lastDay !== null && lastDay !== todayStr() && lastDay !== yesterdayStr()) { streak = 0; save(LSK.streak, streak); }
+}
+
+function deckStats(d) {
+  var p = prog[d.id] || {};
+  var due = 0, learnt = 0, now = Date.now();
+  for (var i = 0; i < d.cards.length; i++) {
+    var e = p[i];
+    if (!e) { due++; continue; }             // jamais vue = à faire
+    if (e.b >= 2) learnt++;
+    if (e.d <= now) due++;
+  }
+  return { due: due, learnt: learnt };
+}
+
+/* ---------------- écrans ---------------- */
+function renderDecks() {
+  checkStreakExpiry();
+  $('fire').textContent = streak > 0 ? '🔥 ' + streak : '';
+  var html = '';
+  DECKS.forEach(function(d, i) {
+    var st = deckStats(d);
+    html += '<div class="deck' + (i === sel ? ' sel' : '') + '" data-i="' + i + '">' +
+      '<span class="dn">' + d.name + '</span>' +
+      '<span class="dd">' + st.due + ' à revoir · ' + st.learnt + '/' + d.cards.length + ' acquises</span></div>';
+  });
+  $('deck-list').innerHTML = html;
+}
+
+function buildQueue() {
+  var p = prog[deck.id] || {};
+  var now = Date.now();
+  var due = [], fresh = [];
+  deck.cards.forEach(function(c, i) {
+    var e = p[i];
+    if (!e) fresh.push(i);
+    else if (e.d <= now) due.push(i);
+  });
+  // mélange léger
+  due.sort(function() { return Math.random() - 0.5; });
+  fresh.sort(function() { return Math.random() - 0.5; });
+  queue = due.concat(fresh).slice(0, 30);   // session de 30 max
+  if (!queue.length) {                       // tout est à jour → révision libre
+    queue = deck.cards.map(function(_, i) { return i; }).sort(function() { return Math.random() - 0.5; }).slice(0, 20);
+  }
+  qi = 0;
+}
+
+function startStudy() {
+  deck = DECKS[sel];
+  buildQueue();
+  screen = 'study';
+  $('decks').classList.remove('visible');
+  $('study').classList.add('visible');
+  showCard();
+}
+function backToDecks() {
+  screen = 'decks';
+  $('study').classList.remove('visible');
+  $('decks').classList.add('visible');
+  renderDecks();
+}
+
+function showCard() {
+  if (qi >= queue.length) { backToDecks(); return; }
+  flipped = false;
+  var c = deck.cards[queue[qi]];
+  $('s-deck').textContent = deck.name.toUpperCase();
+  $('counter').textContent = (qi + 1) + '/' + queue.length;
+  $('c-front').textContent = c[0];
+  $('c-front').className = (deck.big || c[0].length <= 3) ? '' : 'small';
+  $('c-back').textContent = '';
+  $('c-roma').textContent = '';
+  $('c-hint').style.display = '';
+  $('card').classList.remove('flipped');
+  $('grade').classList.remove('visible');
+}
+function flip() {
+  if (flipped) return;
+  flipped = true;
+  var c = deck.cards[queue[qi]];
+  $('c-back').textContent = c[1];
+  $('c-back').className = c[1].length > 10 ? 'small' : '';
+  $('c-roma').textContent = c[2] || '';
+  $('c-hint').style.display = 'none';
+  $('card').classList.add('flipped');
+  $('grade').classList.add('visible');
+}
+function grade(good) {
+  if (!flipped) return;
+  var idx = queue[qi];
+  if (!prog[deck.id]) prog[deck.id] = {};
+  var e = prog[deck.id][idx] || { b: 0, d: 0 };
+  e.b = good ? Math.min(4, e.b + 1) : 0;
+  e.d = Date.now() + INTERVALS[e.b] * 86400000 + (e.b === 0 ? 60000 : 0);  // raté → revient dans 1 min
+  prog[deck.id][idx] = e;
+  save(LSK.prog, prog);
+  // streak quotidien
+  var t = todayStr();
+  if (lastDay !== t) {
+    streak = (lastDay === yesterdayStr()) ? streak + 1 : 1;
+    lastDay = t;
+    save(LSK.streak, streak); save(LSK.last, lastDay);
+  }
+  if (!good) queue.push(idx);   // les ratées reviennent en fin de session
+  qi++;
+  showCard();
+}
+
+/* ---------------- contrôles ---------------- */
+window.addEventListener('scrollUp', function() {
+  if (screen === 'decks') { sel = Math.max(0, sel - 1); renderDecks(); }
+  else { qi = Math.max(0, qi - 1); showCard(); }
+});
+window.addEventListener('scrollDown', function() {
+  if (screen === 'decks') { sel = Math.min(DECKS.length - 1, sel + 1); renderDecks(); }
+  else { qi++; showCard(); }
+});
+window.addEventListener('sideClick', function() {
+  if (screen === 'decks') startStudy();
+  else backToDecks();
+});
+
+$('deck-list').addEventListener('pointerup', function(e) {
+  var row = e.target.closest('.deck');
+  if (!row) return;
+  var i = parseInt(row.dataset.i, 10);
+  if (i === sel) startStudy();
+  else { sel = i; renderDecks(); }
+});
+$('card').addEventListener('pointerup', flip);
+$('g-fail').addEventListener('pointerup', function() { grade(false); });
+$('g-good').addEventListener('pointerup', function() { grade(true); });
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+  if (e.key === ' ')         { if (screen === 'study') flip(); else startStudy(); }
+  if (e.key === '1') grade(false);
+  if (e.key === '2') grade(true);
+});
+
+renderDecks();
+</script>
+</body>
+</html>

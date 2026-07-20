@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Market Watch</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; position: relative; }
+
+#hdr { flex: 0 0 auto; display: flex; align-items: baseline; padding: 7px 10px 4px 10px; }
+#hdr .title { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; color: #F97316; }
+#status { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; }
+
+#list { flex: 1 1 auto; overflow: hidden; }
+.coin {
+  padding: 6px 10px 5px 10px; border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.coin.sel { background: rgba(249,115,22,0.08); border-left: 2px solid rgba(249,115,22,0.6); padding-left: 8px; }
+.c1 { display: flex; align-items: baseline; gap: 6px; }
+.cname { font-size: 14px; font-weight: 800; }
+.cpx { margin-left: auto; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.c2 { display: flex; align-items: baseline; gap: 6px; margin-top: 1px; }
+.cchg { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ccfg { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.45); font-variant-numeric: tabular-nums; }
+.ccfg .edit { color: #F97316; font-weight: 800; }
+.green { color: #4ade80; }
+.red   { color: #f87171; }
+.dim   { color: rgba(255,255,255,0.5); }
+
+#hint {
+  flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center;
+  padding: 3px 6px 5px 6px; border-top: 1px solid rgba(255,255,255,0.08); line-height: 1.4;
+}
+
+/* Alerte plein écran */
+#alert {
+  display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 90;
+  flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center;
+}
+#alert.visible { display: flex; }
+#alert.up   { background: #14532d; }
+#alert.down { background: #7f1d1d; }
+#al-coin { font-size: 26px; font-weight: 800; }
+#al-chg  { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+#al-px   { font-size: 15px; opacity: 0.85; font-variant-numeric: tabular-nums; }
+#al-hint { font-size: 11px; opacity: 0.6; margin-top: 8px; }
+
+/* Édition watchlist */
+#wl-ov {
+  display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(14,14,16,0.96); z-index: 95;
+  flex-direction: column; gap: 8px; padding: 14px;
+}
+#wl-ov.visible { display: flex; }
+#wl-ov .t { font-size: 12px; font-weight: 800; }
+#wl-ov .s { font-size: 10px; color: rgba(255,255,255,0.45); line-height: 1.5; }
+#wl-input {
+  flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px; color: #fff; font-size: 13px; font-family: inherit;
+  padding: 8px; resize: none; outline: none;
+}
+#wl-ov .row { display: flex; gap: 8px; }
+#wl-ov button { flex: 1; padding: 9px 0; border-radius: 6px; border: none; font-size: 12px; font-weight: 800; font-family: inherit; }
+#wl-save { background: #F97316; color: #0e0e10; }
+#wl-cancel { background: rgba(255,255,255,0.12); color: #fff; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hdr">
+    <span class="title">MARKET WATCH</span>
+    <span id="status">…</span>
+  </div>
+  <div id="list"></div>
+  <div id="hint">molette = régler · clic latéral = seuil/fenêtre/naviguer<br>tap = sélectionner · appui long = éditer la watchlist</div>
+
+  <div id="alert">
+    <div id="al-coin"></div>
+    <div id="al-chg"></div>
+    <div id="al-px"></div>
+    <div id="al-hint">tap = OK</div>
+  </div>
+
+  <div id="wl-ov">
+    <div class="t">WATCHLIST</div>
+    <div class="s">Un ticker par ligne. Perps : BTC, ETH, SOL…<br>Marchés xyz : xyz:XYZ100, xyz:AAPL…</div>
+    <textarea id="wl-input"></textarea>
+    <div class="row">
+      <button id="wl-cancel">Annuler</button>
+      <button id="wl-save">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+var API = 'https://api.hyperliquid.xyz/info';
+var POLL_MS = 10000;
+var LSK = 'mw_cfg';
+
+function load(k, def) {
+  try { var v = localStorage.getItem(k); return v === null ? def : JSON.parse(v); }
+  catch (e) { return def; }
+}
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+// Watchlist par défaut : BTC (perps) + l'indice XYZ100 (dex xyz)
+var cfg = load(LSK, {
+  coins: [
+    { key: 'BTC',        thr: 1.5, win: 15 },   // seuil % / fenêtre min
+    { key: 'xyz:XYZ100', thr: 1.5, win: 15 }
+  ]
+});
+
+var hist = {};        // key -> [{t, px}]
+var last = {};        // key -> dernier prix
+var alarmed = {};     // key -> true si alerte déjà déclenchée (réarmée sous 80 % du seuil)
+var sel = 0;
+var mode = 'nav';     // nav | thr | win  (cycle au clic latéral)
+var lastPoll = null, pollErr = false;
+
+var $ = function(id) { return document.getElementById(id); };
+function esc(s) { return String(s).replace(/[&<>"]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function fmtPx(x) {
+  if (!isFinite(x)) return '–';
+  var dec = x >= 1000 ? 1 : x >= 10 ? 2 : x >= 0.1 ? 4 : 6;
+  var s = x.toFixed(dec).split('.');
+  s[0] = s[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return s.join(',');
+}
+
+/* ---------------- polling ---------------- */
+function poll() {
+  var needXyz = cfg.coins.some(function(c) { return c.key.indexOf('xyz:') === 0; });
+  var needMain = cfg.coins.some(function(c) { return c.key.indexOf(':') === -1; });
+  var reqs = [];
+  if (needMain) reqs.push(fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'allMids' }) }).then(function(r) { if (!r.ok) throw 0; return r.json(); }));
+  else reqs.push(Promise.resolve({}));
+  if (needXyz) reqs.push(fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'allMids', dex: 'xyz' }) }).then(function(r) { if (!r.ok) throw 0; return r.json(); }));
+  else reqs.push(Promise.resolve({}));
+
+  Promise.all(reqs).then(function(res) {
+    var mids = res[0], midsXyz = res[1];
+    var now = Date.now();
+    cfg.coins.forEach(function(c) {
+      var raw = c.key.indexOf('xyz:') === 0 ? midsXyz[c.key] : mids[c.key];
+      var px = parseFloat(raw);
+      if (!isFinite(px)) return;
+      last[c.key] = px;
+      if (!hist[c.key]) hist[c.key] = [];
+      hist[c.key].push({ t: now, px: px });
+      // purge au-delà de la fenêtre (+ marge)
+      var cut = now - (c.win + 5) * 60000;
+      while (hist[c.key].length && hist[c.key][0].t < cut) hist[c.key].shift();
+      checkAlert(c);
+    });
+    lastPoll = now; pollErr = false;
+    render();
+  }).catch(function() {
+    pollErr = true;
+    render();
+  });
+}
+
+function windowChange(c) {
+  var h = hist[c.key];
+  if (!h || h.length < 2) return null;
+  var cut = Date.now() - c.win * 60000;
+  var base = null;
+  for (var i = 0; i < h.length; i++) { if (h[i].t >= cut) { base = h[i].px; break; } }
+  if (base === null) base = h[0].px;
+  return (h[h.length - 1].px / base - 1) * 100;
+}
+
+/* ---------------- alerte ---------------- */
+function checkAlert(c) {
+  var chg = windowChange(c);
+  if (chg === null) return;
+  if (Math.abs(chg) < c.thr * 0.8) alarmed[c.key] = false;   // réarmement
+  if (Math.abs(chg) >= c.thr && !alarmed[c.key]) {
+    alarmed[c.key] = true;
+    fireAlert(c, chg);
+  }
+}
+
+function fireAlert(c, chg) {
+  var al = $('alert');
+  al.className = 'visible ' + (chg >= 0 ? 'up' : 'down');
+  $('al-coin').textContent = c.key.replace('xyz:', '');
+  $('al-chg').textContent = (chg >= 0 ? '+' : '−') + Math.abs(chg).toFixed(2).replace('.', ',') + ' %';
+  $('al-px').textContent = fmtPx(last[c.key]) + ' · fenêtre ' + c.win + ' min';
+  beep(chg >= 0);
+  if (navigator.vibrate) { try { navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) {} }
+}
+$('alert').addEventListener('pointerup', function() { $('alert').className = ''; });
+
+/* bip Web Audio — le contexte est créé/réveillé au premier geste utilisateur */
+var actx = null;
+function ensureAudio() {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+  } catch (e) {}
+}
+document.addEventListener('pointerdown', ensureAudio, { once: false });
+function beep(up) {
+  try {
+    ensureAudio();
+    if (!actx) return;
+    var t0 = actx.currentTime;
+    [0, 0.25, 0.5].forEach(function(off, i) {
+      var o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'square';
+      o.frequency.value = up ? 880 + i * 220 : 660 - i * 110;
+      g.gain.setValueAtTime(0.001, t0 + off);
+      g.gain.exponentialRampToValueAtTime(0.25, t0 + off + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + off + 0.18);
+      o.connect(g); g.connect(actx.destination);
+      o.start(t0 + off); o.stop(t0 + off + 0.2);
+    });
+  } catch (e) {}
+}
+
+/* ---------------- rendu ---------------- */
+function render() {
+  var st = $('status');
+  if (pollErr) { st.textContent = 'hors ligne'; st.style.color = '#f87171'; }
+  else if (lastPoll) { st.textContent = 'màj il y a ' + Math.max(0, Math.round((Date.now() - lastPoll) / 1000)) + ' s'; st.style.color = ''; }
+
+  if (sel >= cfg.coins.length) sel = Math.max(0, cfg.coins.length - 1);
+  var html = '';
+  cfg.coins.forEach(function(c, i) {
+    var px = last[c.key];
+    var chg = windowChange(c);
+    var cls = chg === null ? 'dim' : (chg >= 0 ? 'green' : 'red');
+    var chgTxt = chg === null ? '· · ·' : (chg >= 0 ? '+' : '−') + Math.abs(chg).toFixed(2).replace('.', ',') + ' %';
+    var isSel = i === sel;
+    var thrTxt = '±' + c.thr.toFixed(1).replace('.', ',') + ' %';
+    var winTxt = c.win + ' min';
+    if (isSel && mode === 'thr') thrTxt = '<span class="edit">' + thrTxt + ' ◂▸</span>';
+    if (isSel && mode === 'win') winTxt = '<span class="edit">' + winTxt + ' ◂▸</span>';
+    html += '<div class="coin' + (isSel ? ' sel' : '') + '" data-i="' + i + '">' +
+      '<div class="c1"><span class="cname">' + esc(c.key.replace('xyz:', '')) + '</span>' +
+        '<span class="cpx">' + (px !== undefined ? fmtPx(px) : '–') + '</span></div>' +
+      '<div class="c2"><span class="cchg ' + cls + '">' + chgTxt + '</span>' +
+        '<span class="ccfg">' + thrTxt + ' / ' + winTxt + '</span></div>' +
+    '</div>';
+  });
+  $('list').innerHTML = html;
+}
+
+/* ---------------- contrôles ---------------- */
+var THR_STEPS = [0.3, 0.5, 0.8, 1, 1.5, 2, 3, 5, 8, 10];
+var WIN_STEPS = [1, 3, 5, 10, 15, 30, 60, 120];
+
+function stepVal(steps, cur, dir) {
+  var i = 0, best = 0, bd = 1e9;
+  for (i = 0; i < steps.length; i++) { var d = Math.abs(steps[i] - cur); if (d < bd) { bd = d; best = i; } }
+  return steps[Math.min(steps.length - 1, Math.max(0, best + dir))];
+}
+
+// Molette (mapping naturel R1 : scrollUp = diminuer/monter, scrollDown = augmenter/descendre)
+function onWheel(dir) {
+  if ($('wl-ov').classList.contains('visible') || $('alert').classList.contains('visible')) return;
+  var c = cfg.coins[sel];
+  if (!c) return;
+  if (mode === 'thr') { c.thr = stepVal(THR_STEPS, c.thr, dir); save(LSK, cfg); alarmed[c.key] = false; }
+  else if (mode === 'win') { c.win = stepVal(WIN_STEPS, c.win, dir); save(LSK, cfg); alarmed[c.key] = false; }
+  else { sel = Math.min(cfg.coins.length - 1, Math.max(0, sel + dir)); }
+  render();
+}
+window.addEventListener('scrollUp',   function() { onWheel(-1); });
+window.addEventListener('scrollDown', function() { onWheel(1); });
+
+// Clic latéral : cycle nav → seuil → fenêtre
+window.addEventListener('sideClick', function() {
+  if ($('wl-ov').classList.contains('visible')) return;
+  if ($('alert').classList.contains('visible')) { $('alert').className = ''; return; }
+  mode = mode === 'nav' ? 'thr' : (mode === 'thr' ? 'win' : 'nav');
+  render();
+});
+
+// Tap = sélectionner ; appui long = éditer la watchlist
+(function() {
+  var t = null, longFired = false;
+  var list = $('list');
+  list.addEventListener('pointerdown', function() {
+    longFired = false;
+    t = setTimeout(function() { longFired = true; openWl(); }, 650);
+  });
+  list.addEventListener('pointerup', function(e) {
+    clearTimeout(t);
+    if (longFired) return;
+    var row = e.target.closest('.coin');
+    if (row) { sel = parseInt(row.dataset.i, 10); render(); }
+  });
+  ['pointerleave', 'pointercancel'].forEach(function(ev) { list.addEventListener(ev, function() { clearTimeout(t); }); });
+})();
+
+function openWl() {
+  $('wl-input').value = cfg.coins.map(function(c) { return c.key; }).join('\n');
+  $('wl-ov').classList.add('visible');
+  setTimeout(function() { $('wl-input').focus(); }, 60);
+}
+$('wl-cancel').addEventListener('pointerup', function() { $('wl-input').blur(); $('wl-ov').classList.remove('visible'); });
+$('wl-save').addEventListener('pointerup', function() {
+  var keys = $('wl-input').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+  if (keys.length) {
+    cfg.coins = keys.map(function(k) {
+      var old = null;
+      cfg.coins.forEach(function(c) { if (c.key === k) old = c; });
+      return old || { key: k, thr: 1.5, win: 15 };
+    });
+    save(LSK, cfg);
+    sel = 0; hist = {}; alarmed = {};
+    poll();
+  }
+  $('wl-input').blur(); $('wl-ov').classList.remove('visible');
+  render();
+});
+
+// Fallbacks clavier desktop
+document.addEventListener('keydown', function(e) {
+  if ($('wl-ov').classList.contains('visible')) { if (e.key === 'Escape') $('wl-cancel').dispatchEvent(new PointerEvent('pointerup')); return; }
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+  if (e.key === 'w')         openWl();
+});
+
+poll();
+setInterval(poll, POLL_MS);
+setInterval(render, 1000);
+</script>
+</body>
+</html>

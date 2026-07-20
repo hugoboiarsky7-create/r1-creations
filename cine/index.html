@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Ciné-Roulette</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; position: relative; }
+.screen { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; flex-direction: column; }
+.screen.visible { display: flex; }
+
+.hdr { flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px; padding: 7px 10px 4px 10px; }
+.hdr .t { font-size: 13px; font-weight: 800; color: #F472B6; letter-spacing: 0.5px; }
+.hdr .c { margin-left: auto; font-size: 10px; color: rgba(255,255,255,0.4); }
+
+#clip { flex: 1 1 auto; overflow: hidden; }
+#films { transition: transform 0.1s ease-out; }
+.film { min-height: 26px; display: flex; align-items: center; gap: 6px; padding: 2px 10px; font-size: 12px; }
+.film .tt { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.film.seen .tt { color: rgba(255,255,255,0.4); text-decoration: line-through; }
+.film .tag { font-size: 11px; }
+.film .du { font-size: 10px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; }
+.film .nt { font-size: 11px; font-weight: 800; color: #FACC15; }
+.empty { padding: 30px 22px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.35); line-height: 1.7; }
+
+.hint { flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center; padding: 3px 6px 5px 6px; border-top: 1px solid rgba(255,255,255,0.08); line-height: 1.4; }
+
+/* Roulette */
+#roul { align-items: center; justify-content: center; gap: 10px; padding: 14px; }
+.rl { font-size: 10px; color: rgba(255,255,255,0.45); letter-spacing: 0.5px; }
+.rv { font-size: 15px; font-weight: 800; padding: 6px 14px; border-radius: 8px; background: rgba(255,255,255,0.07); }
+#go { padding: 13px 34px; border-radius: 10px; border: none; font-size: 16px; font-weight: 800; font-family: inherit; background: #F472B6; color: #0e0e10; margin-top: 6px; }
+#result-title { font-size: 18px; font-weight: 800; text-align: center; line-height: 1.3; }
+#result-sub { font-size: 11px; color: rgba(255,255,255,0.5); }
+
+/* Stats */
+#stats-body { flex: 1; padding: 6px 12px; overflow: hidden; font-size: 12px; line-height: 1.7; }
+.bar { font-family: monospace; font-size: 10px; color: #F472B6; }
+.sv { font-weight: 800; color: #FACC15; }
+
+/* Overlays */
+.overlay {
+  display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(14,14,16,0.96); z-index: 50;
+  flex-direction: column; gap: 8px; padding: 14px;
+}
+.overlay.visible { display: flex; }
+.overlay .t { font-size: 12px; font-weight: 800; }
+.overlay textarea {
+  flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px; color: #fff; font-size: 13px; font-family: inherit; padding: 8px; resize: none; outline: none;
+}
+.overlay .row { display: flex; gap: 6px; }
+.overlay button { flex: 1; padding: 9px 0; border-radius: 6px; border: none; font-size: 11px; font-weight: 800; font-family: inherit; background: rgba(255,255,255,0.1); color: #fff; }
+.overlay button.on { background: #F472B6; color: #0e0e10; }
+#voice-ov { align-items: center; justify-content: center; }
+#voice-ov .mic { font-size: 34px; }
+#voice-ov .vl { font-size: 13px; font-weight: 700; color: #F472B6; }
+#rate-val { font-size: 44px; font-weight: 800; color: #FACC15; text-align: center; }
+
+#toast {
+  display: none; position: absolute; left: 20px; right: 20px; bottom: 34px; z-index: 60;
+  background: rgba(255,255,255,0.12); border-radius: 6px; padding: 6px;
+  font-size: 11px; font-weight: 700; text-align: center;
+}
+#toast.visible { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="screen visible" id="list-scr">
+    <div class="hdr"><span class="t">CINÉ-ROULETTE</span><span class="c" id="count"></span></div>
+    <div id="clip"><div id="films"></div></div>
+    <div class="hint">PTT = dicter un film · tap = noter/voir · appui long = supprimer<br>clic latéral = roulette / stats</div>
+  </div>
+
+  <div class="screen" id="roul">
+    <div class="hdr" style="align-self:stretch"><span class="t">ROULETTE DU SOIR</span></div>
+    <div class="rl">DURÉE MAX (molette)</div>
+    <div class="rv" id="f-dur">2 h 00</div>
+    <div class="rl">ENVIE (tap)</div>
+    <div class="rv" id="f-tag">Peu importe</div>
+    <button id="go">🎬 TIRER</button>
+    <div id="result-title"></div>
+    <div id="result-sub"></div>
+  </div>
+
+  <div class="screen" id="stats-scr">
+    <div class="hdr"><span class="t">STATS</span></div>
+    <div id="stats-body"></div>
+  </div>
+
+  <div class="overlay" id="voice-ov"><div class="mic">🎤</div><div class="vl" id="voice-lbl">J'écoute…</div></div>
+
+  <div class="overlay" id="add-ov">
+    <div class="t" id="add-title">Nouveau film</div>
+    <textarea id="add-input" placeholder="Titre du film"></textarea>
+    <div class="t" style="font-size:10px;color:rgba(255,255,255,0.45)">ENVIE</div>
+    <div class="row" id="tag-row">
+      <button data-tag="cerebral">🧠 Cérébral</button>
+      <button data-tag="tendu">😰 Tendu</button>
+      <button data-tag="detente" class="on">🛋 Détente</button>
+    </div>
+    <div class="t" style="font-size:10px;color:rgba(255,255,255,0.45)">DURÉE ESTIMÉE : <span id="dur-lbl">2 h 00</span> (molette)</div>
+    <div class="row"><button id="add-cancel">Annuler</button><button id="add-save" class="on">Ajouter</button></div>
+  </div>
+
+  <div class="overlay" id="rate-ov">
+    <div class="t" id="rate-title"></div>
+    <div id="rate-val">7</div>
+    <div class="t" style="font-size:10px;color:rgba(255,255,255,0.45);text-align:center">molette = note</div>
+    <div class="row"><button id="rate-cancel">Annuler</button><button id="rate-save" class="on">Vu ! Noter</button></div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+'use strict';
+var LSK = 'cn_films';
+function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+var films = load(LSK, []);   // {id, title, tag, dur(min), rating|null, watchedAt|null, addedAt}
+var TAGS = { cerebral: '🧠', tendu: '😰', detente: '🛋' };
+var TAG_NAMES = { cerebral: 'Cérébral', tendu: 'Tendu', detente: 'Détente' };
+
+var screen = 'list';        // list | roul | stats
+var scrollOff = 0, isListening = false;
+var addTag = 'detente', addDur = 120;
+var fDur = 120, fTagIdx = 0;   // filtres roulette
+var F_TAGS = [null, 'cerebral', 'tendu', 'detente'];
+var rateTarget = null, rateVal = 7;
+
+var $ = function(id) { return document.getElementById(id); };
+function esc(s) { return String(s).replace(/[&<>"]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function fmtDur(m) { return Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0'); }
+
+/* ---------------- écrans ---------------- */
+function show(s) {
+  screen = s;
+  $('list-scr').classList.toggle('visible', s === 'list');
+  $('roul').classList.toggle('visible', s === 'roul');
+  $('stats-scr').classList.toggle('visible', s === 'stats');
+  render();
+}
+
+function render() {
+  if (screen === 'list') {
+    var un = films.filter(function(f) { return !f.watchedAt; }).length;
+    $('count').textContent = films.length ? un + ' à voir · ' + (films.length - un) + ' vus' : '';
+    var el = $('films');
+    if (!films.length) {
+      el.innerHTML = '<div class="empty">Watchlist vide.<br><br>Maintiens le bouton latéral<br>et dicte un titre 🎤</div>';
+      el.style.transform = 'translateY(0)';
+      return;
+    }
+    var sorted = films.slice().sort(function(a, b) { return (a.watchedAt ? 1 : 0) - (b.watchedAt ? 1 : 0) || b.addedAt - a.addedAt; });
+    el.innerHTML = sorted.map(function(f) {
+      return '<div class="film' + (f.watchedAt ? ' seen' : '') + '" data-id="' + f.id + '">' +
+        '<span class="tag">' + TAGS[f.tag] + '</span>' +
+        '<span class="tt">' + esc(f.title) + '</span>' +
+        (f.watchedAt ? '<span class="nt">' + f.rating + '/10</span>' : '<span class="du">' + fmtDur(f.dur) + '</span>') +
+        '</div>';
+    }).join('');
+    clampScroll();
+  }
+  if (screen === 'roul') {
+    $('f-dur').textContent = fmtDur(fDur) + ' max';
+    $('f-tag').textContent = F_TAGS[fTagIdx] ? TAGS[F_TAGS[fTagIdx]] + ' ' + TAG_NAMES[F_TAGS[fTagIdx]] : 'Peu importe';
+  }
+  if (screen === 'stats') renderStats();
+}
+function clampScroll() {
+  var H = $('clip').clientHeight || 180;
+  var total = $('films').scrollHeight;
+  scrollOff = Math.min(Math.max(0, total - H), Math.max(0, scrollOff));
+  $('films').style.transform = 'translateY(-' + scrollOff + 'px)';
+}
+
+function renderStats() {
+  var seen = films.filter(function(f) { return f.watchedAt; });
+  if (!seen.length) { $('stats-body').innerHTML = '<div class="empty">Aucun film noté pour l\'instant.</div>'; return; }
+  var avg = seen.reduce(function(s, f) { return s + f.rating; }, 0) / seen.length;
+  var byYear = {};
+  seen.forEach(function(f) { var y = new Date(f.watchedAt).getFullYear(); byYear[y] = (byYear[y] || 0) + 1; });
+  var dist = {};
+  seen.forEach(function(f) { dist[f.rating] = (dist[f.rating] || 0) + 1; });
+  var maxD = Math.max.apply(null, Object.keys(dist).map(function(k) { return dist[k]; }));
+  var html = 'Films vus : <span class="sv">' + seen.length + '</span><br>' +
+    'Note moyenne : <span class="sv">' + avg.toFixed(1).replace('.', ',') + '/10</span><br>';
+  Object.keys(byYear).sort().forEach(function(y) { html += y + ' : <span class="sv">' + byYear[y] + '</span> film' + (byYear[y] > 1 ? 's' : '') + '<br>'; });
+  html += '<br>';
+  for (var n = 10; n >= 1; n--) {
+    if (!dist[n]) continue;
+    html += '<div class="bar">' + String(n).padStart(2, ' ') + ' ' + '█'.repeat(Math.max(1, Math.round(dist[n] / maxD * 14))) + ' ' + dist[n] + '</div>';
+  }
+  $('stats-body').innerHTML = html;
+}
+
+var toastT = null;
+function toast(t) {
+  var el = $('toast');
+  el.textContent = t; el.classList.add('visible');
+  clearTimeout(toastT);
+  toastT = setTimeout(function() { el.classList.remove('visible'); }, 1500);
+}
+
+/* ---------------- ajout (voix ou clavier) ---------------- */
+function anyOverlay() { return ['voice-ov', 'add-ov', 'rate-ov'].some(function(id) { return $(id).classList.contains('visible'); }); }
+
+function openAdd(title) {
+  $('add-input').value = title || '';
+  addTag = 'detente'; addDur = 120;
+  syncAddUi();
+  $('add-ov').classList.add('visible');
+  if (!title) setTimeout(function() { $('add-input').focus(); }, 60);
+}
+function syncAddUi() {
+  document.querySelectorAll('#tag-row button').forEach(function(b) { b.classList.toggle('on', b.dataset.tag === addTag); });
+  $('dur-lbl').textContent = fmtDur(addDur);
+}
+document.querySelectorAll('#tag-row button').forEach(function(b) {
+  b.addEventListener('pointerup', function() { addTag = b.dataset.tag; syncAddUi(); });
+});
+$('add-save').addEventListener('pointerup', function() {
+  var t = $('add-input').value.trim();
+  if (t) {
+    films.push({ id: Date.now() + '', title: t.charAt(0).toUpperCase() + t.slice(1), tag: addTag, dur: addDur, rating: null, watchedAt: null, addedAt: Date.now() });
+    save(LSK, films);
+    toast('Ajouté : ' + t.slice(0, 24));
+  }
+  $('add-input').blur(); $('add-ov').classList.remove('visible');
+  show('list');
+});
+$('add-cancel').addEventListener('pointerup', function() { $('add-input').blur(); $('add-ov').classList.remove('visible'); });
+
+window.addEventListener('longPressStart', function() {
+  if (anyOverlay() && !$('voice-ov').classList.contains('visible')) return;
+  if (typeof CreationVoiceHandler !== 'undefined') {
+    if (isListening) return;
+    isListening = true;
+    $('voice-lbl').textContent = 'J\'écoute…';
+    $('voice-ov').classList.add('visible');
+    CreationVoiceHandler.postMessage('start');
+  }
+});
+window.addEventListener('longPressEnd', function() {
+  if (typeof CreationVoiceHandler !== 'undefined') {
+    if (!isListening) return;
+    $('voice-lbl').textContent = 'Transcription…';
+    CreationVoiceHandler.postMessage('stop');
+  } else if (!anyOverlay()) openAdd('');
+});
+window.onPluginMessage = function(data) {
+  if (!data || data.type !== 'sttEnded') return;
+  isListening = false;
+  $('voice-ov').classList.remove('visible');
+  var tr = (data.transcript || '').trim();
+  if (tr) openAdd(tr);   // le titre arrive pré-rempli, on choisit envie + durée
+};
+
+/* ---------------- notation ---------------- */
+function openRate(f) {
+  rateTarget = f; rateVal = f.rating || 7;
+  $('rate-title').textContent = f.title;
+  $('rate-val').textContent = rateVal;
+  $('rate-ov').classList.add('visible');
+}
+$('rate-save').addEventListener('pointerup', function() {
+  if (rateTarget) {
+    rateTarget.rating = rateVal;
+    if (!rateTarget.watchedAt) rateTarget.watchedAt = Date.now();
+    save(LSK, films);
+    toast(rateTarget.title.slice(0, 20) + ' → ' + rateVal + '/10');
+  }
+  $('rate-ov').classList.remove('visible');
+  render();
+});
+$('rate-cancel').addEventListener('pointerup', function() { $('rate-ov').classList.remove('visible'); });
+
+/* ---------------- roulette ---------------- */
+$('go').addEventListener('pointerup', function() {
+  var pool = films.filter(function(f) {
+    return !f.watchedAt && f.dur <= fDur && (!F_TAGS[fTagIdx] || f.tag === F_TAGS[fTagIdx]);
+  });
+  if (!pool.length) {
+    $('result-title').textContent = 'Rien ne correspond 😢';
+    $('result-sub').textContent = 'Élargis les filtres ou ajoute des films';
+    return;
+  }
+  var pick = pool[Math.floor(Math.random() * pool.length)];
+  $('result-title').textContent = '🎬 ' + pick.title;
+  $('result-sub').textContent = TAGS[pick.tag] + ' ' + TAG_NAMES[pick.tag] + ' · ' + fmtDur(pick.dur) + ' · re-tap pour relancer';
+});
+$('f-tag').addEventListener('pointerup', function() { fTagIdx = (fTagIdx + 1) % F_TAGS.length; render(); });
+
+/* ---------------- tactile liste ---------------- */
+(function() {
+  var t = null, longFired = false, targetId = null;
+  var el = $('films');
+  el.addEventListener('pointerdown', function(e) {
+    var row = e.target.closest('.film');
+    if (!row) return;
+    targetId = row.dataset.id; longFired = false;
+    t = setTimeout(function() {
+      longFired = true;
+      films = films.filter(function(x) { return x.id !== targetId; });
+      save(LSK, films);
+      render(); toast('Supprimé');
+    }, 600);
+  });
+  el.addEventListener('pointerup', function(e) {
+    clearTimeout(t);
+    if (longFired || !targetId) { targetId = null; return; }
+    var f = null;
+    films.forEach(function(x) { if (x.id === targetId) f = x; });
+    targetId = null;
+    if (f) openRate(f);
+  });
+  ['pointerleave', 'pointercancel'].forEach(function(ev) { el.addEventListener(ev, function() { clearTimeout(t); }); });
+})();
+
+/* ---------------- molette + clic latéral ---------------- */
+window.addEventListener('scrollUp', function() {
+  if ($('rate-ov').classList.contains('visible')) { rateVal = Math.max(1, rateVal - 1); $('rate-val').textContent = rateVal; return; }
+  if ($('add-ov').classList.contains('visible')) { addDur = Math.max(60, addDur - 15); syncAddUi(); return; }
+  if (screen === 'list') { scrollOff -= 26; clampScroll(); }
+  else if (screen === 'roul') { fDur = Math.max(60, fDur - 15); render(); }
+});
+window.addEventListener('scrollDown', function() {
+  if ($('rate-ov').classList.contains('visible')) { rateVal = Math.min(10, rateVal + 1); $('rate-val').textContent = rateVal; return; }
+  if ($('add-ov').classList.contains('visible')) { addDur = Math.min(300, addDur + 15); syncAddUi(); return; }
+  if (screen === 'list') { scrollOff += 26; clampScroll(); }
+  else if (screen === 'roul') { fDur = Math.min(300, fDur + 15); render(); }
+});
+window.addEventListener('sideClick', function() {
+  if (anyOverlay()) return;
+  show(screen === 'list' ? 'roul' : (screen === 'roul' ? 'stats' : 'list'));
+});
+
+document.addEventListener('keydown', function(e) {
+  if ($('add-ov').classList.contains('visible')) { if (e.key === 'Enter') $('add-save').dispatchEvent(new PointerEvent('pointerup')); if (e.key === 'Escape') $('add-cancel').dispatchEvent(new PointerEvent('pointerup')); return; }
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+  if (e.key === ' ' && !e.repeat) window.dispatchEvent(new Event('longPressStart'));
+});
+document.addEventListener('keyup', function(e) {
+  if (e.key === ' ' && !$('add-ov').classList.contains('visible')) window.dispatchEvent(new Event('longPressEnd'));
+});
+
+render();
+</script>
+</body>
+</html>

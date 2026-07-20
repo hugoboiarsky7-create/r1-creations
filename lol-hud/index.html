@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>LoL Live HUD</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; }
+
+#hdr { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 10px 4px 10px; }
+#clock { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+#score { margin-left: auto; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ord { color: #60A5FA; } .cha { color: #f87171; }
+
+#me {
+  flex: 0 0 auto; display: flex; align-items: baseline; gap: 7px;
+  padding: 3px 10px 4px 10px; background: rgba(96,165,250,0.08);
+  font-variant-numeric: tabular-nums;
+}
+#me .ch { font-size: 12px; font-weight: 800; }
+#me .kda { font-size: 13px; font-weight: 800; color: #FACC15; }
+#me .cs, #me .gold { font-size: 11px; color: rgba(255,255,255,0.6); }
+#me .gold { margin-left: auto; }
+
+#events { flex: 0 0 auto; padding: 2px 10px; border-bottom: 1px solid rgba(255,255,255,0.08); min-height: 40px; }
+.ev { font-size: 10px; color: rgba(255,255,255,0.6); line-height: 1.45; font-variant-numeric: tabular-nums; }
+.ev b { color: #FACC15; }
+
+#clip { flex: 1 1 auto; overflow: hidden; }
+#players { transition: transform 0.1s ease-out; }
+.team-hdr { font-size: 9px; font-weight: 800; letter-spacing: 0.6px; padding: 3px 10px 1px 10px; }
+.pl { height: 20px; display: flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.pl.dead { opacity: 0.4; }
+.pl .ch { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; }
+.pl .kda { font-weight: 800; }
+.pl .cs { color: rgba(255,255,255,0.45); font-size: 10px; }
+.pl.self { background: rgba(250,204,21,0.08); }
+
+#wait {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; text-align: center; padding: 0 24px;
+}
+#wait .big { font-size: 15px; font-weight: 800; color: rgba(255,255,255,0.7); }
+#wait .sm { font-size: 11px; color: rgba(255,255,255,0.35); line-height: 1.6; }
+#foot { flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center; padding: 3px 5px 5px 5px; border-top: 1px solid rgba(255,255,255,0.08); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hdr"><span id="clock">–</span><span id="score"></span></div>
+  <div id="me" style="display:none"></div>
+  <div id="events" style="display:none"></div>
+  <div id="clip" style="display:none"><div id="players"></div></div>
+  <div id="wait">
+    <div class="big">En attente de partie…</div>
+    <div class="sm" id="wait-detail">Lance bridge.py sur ton PC,<br>le HUD s'affichera tout seul.</div>
+  </div>
+  <div id="foot">molette = joueurs · données via ton Worker</div>
+</div>
+
+<script>
+'use strict';
+/* ====== CONFIG — mets l'URL de TON Worker déployé ====== */
+var WORKER_URL = 'https://TON-WORKER.workers.dev';
+var POLL_MS = 2000;
+var STALE_MS = 12000;   // au-delà : considéré hors partie
+/* ======================================================= */
+
+var mock = new URLSearchParams(location.search).get('mock');
+var state = null, stateTs = 0, scrollOff = 0;
+var $ = function(id) { return document.getElementById(id); };
+function esc(s) { return String(s).replace(/[&<>"]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+/* ---------------- données ---------------- */
+function poll() {
+  if (mock) { state = MOCK; stateTs = Date.now(); render(); return; }
+  fetch(WORKER_URL + '/state')
+    .then(function(r) { if (!r.ok) throw 0; return r.json(); })
+    .then(function(d) {
+      state = d.data; stateTs = d.ts || 0;
+      render();
+    })
+    .catch(function() { render(); });
+}
+
+function playerName(p) { return p.riotId || p.summonerName || '?'; }
+function myEntry() {
+  if (!state || !state.activePlayer || !state.allPlayers) return null;
+  var meName = state.activePlayer.riotId || state.activePlayer.summonerName;
+  for (var i = 0; i < state.allPlayers.length; i++) {
+    if (playerName(state.allPlayers[i]) === meName) return state.allPlayers[i];
+  }
+  return null;
+}
+
+var EV_LABELS = {
+  DragonKill: '🐉 Drake', BaronKill: '👹 Baron', HeraldKill: '🐌 Héraut',
+  TurretKilled: '🗼 Tour', InhibKilled: '💎 Inhib', Ace: '💀 ACE', FirstBlood: '🩸 First blood'
+};
+
+/* ---------------- rendu ---------------- */
+function fmtClock(s) {
+  s = Math.floor(s);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function render() {
+  var live = state && state.allPlayers && (Date.now() - stateTs < STALE_MS || mock);
+  $('wait').style.display = live ? 'none' : '';
+  $('me').style.display = live ? '' : 'none';
+  $('events').style.display = live ? '' : 'none';
+  $('clip').style.display = live ? '' : 'none';
+  if (!live) {
+    $('clock').textContent = '–';
+    $('score').textContent = '';
+    $('wait-detail').innerHTML = stateTs > 0
+      ? 'Dernières données il y a ' + Math.round((Date.now() - stateTs) / 1000) + ' s.<br>Lance bridge.py + une partie.'
+      : 'Lance bridge.py sur ton PC,<br>le HUD s\'affichera tout seul.';
+    return;
+  }
+
+  // chrono + score global
+  $('clock').textContent = fmtClock(state.gameData ? state.gameData.gameTime : 0);
+  var kOrd = 0, kCha = 0;
+  state.allPlayers.forEach(function(p) {
+    if (p.team === 'ORDER') kOrd += p.scores.kills; else kCha += p.scores.kills;
+  });
+  $('score').innerHTML = '<span class="ord">' + kOrd + '</span> — <span class="cha">' + kCha + '</span>';
+
+  // ma ligne
+  var me = myEntry();
+  if (me) {
+    var gold = state.activePlayer && state.activePlayer.currentGold !== undefined
+      ? Math.round(state.activePlayer.currentGold) : null;
+    $('me').innerHTML =
+      '<span class="ch">' + esc(me.championName) + '</span>' +
+      '<span class="kda">' + me.scores.kills + '/' + me.scores.deaths + '/' + me.scores.assists + '</span>' +
+      '<span class="cs">' + me.scores.creepScore + ' CS</span>' +
+      (gold !== null ? '<span class="gold">' + gold + ' 🪙</span>' : '');
+  } else {
+    $('me').innerHTML = '<span class="ch">Spectateur</span>';
+  }
+
+  // événements récents importants
+  var evs = (state.events && state.events.Events) || [];
+  var majors = evs.filter(function(e) { return EV_LABELS[e.EventName]; }).slice(-4).reverse();
+  $('events').innerHTML = majors.length
+    ? majors.map(function(e) {
+        var extra = e.DragonType ? ' (' + e.DragonType + ')' : '';
+        return '<div class="ev"><b>' + fmtClock(e.EventTime) + '</b> ' + EV_LABELS[e.EventName] + extra +
+          (e.KillerName ? ' — ' + esc(String(e.KillerName).split('#')[0]) : '') + '</div>';
+      }).join('')
+    : '<div class="ev">Aucun objectif pris pour l\'instant</div>';
+
+  // les 10 joueurs
+  var meName = me ? playerName(me) : '';
+  var html = '';
+  ['ORDER', 'CHAOS'].forEach(function(team) {
+    html += '<div class="team-hdr ' + (team === 'ORDER' ? 'ord' : 'cha') + '">' + (team === 'ORDER' ? 'ÉQUIPE BLEUE' : 'ÉQUIPE ROUGE') + '</div>';
+    state.allPlayers.filter(function(p) { return p.team === team; }).forEach(function(p) {
+      html += '<div class="pl' + (p.isDead ? ' dead' : '') + (playerName(p) === meName ? ' self' : '') + '">' +
+        '<span class="ch">' + esc(p.championName) + '</span>' +
+        '<span class="kda">' + p.scores.kills + '/' + p.scores.deaths + '/' + p.scores.assists + '</span>' +
+        '<span class="cs">' + p.scores.creepScore + '</span></div>';
+    });
+  });
+  $('players').innerHTML = html;
+  clampScroll();
+}
+function clampScroll() {
+  var H = $('clip').clientHeight || 100;
+  var total = $('players').scrollHeight;
+  scrollOff = Math.min(Math.max(0, total - H), Math.max(0, scrollOff));
+  $('players').style.transform = 'translateY(-' + scrollOff + 'px)';
+}
+
+/* ---------------- contrôles ---------------- */
+window.addEventListener('scrollUp',   function() { scrollOff -= 20; clampScroll(); });
+window.addEventListener('scrollDown', function() { scrollOff += 20; clampScroll(); });
+window.addEventListener('sideClick',  poll);
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+});
+
+/* ---------------- données de démo (?mock=1) ---------------- */
+var MOCK = {
+  activePlayer: { riotId: 'Hugo#EUW', currentGold: 1834.5 },
+  gameData: { gameTime: 1147, gameMode: 'CLASSIC' },
+  allPlayers: [
+    { riotId: 'Hugo#EUW', championName: 'Jinx', team: 'ORDER', isDead: false, scores: { kills: 7, deaths: 2, assists: 5, creepScore: 187 } },
+    { riotId: 'TopOr#EUW', championName: 'Garen', team: 'ORDER', isDead: false, scores: { kills: 2, deaths: 4, assists: 3, creepScore: 142 } },
+    { riotId: 'JglOr#EUW', championName: 'Lee Sin', team: 'ORDER', isDead: true, scores: { kills: 4, deaths: 3, assists: 9, creepScore: 118 } },
+    { riotId: 'MidOr#EUW', championName: 'Ahri', team: 'ORDER', isDead: false, scores: { kills: 5, deaths: 1, assists: 6, creepScore: 176 } },
+    { riotId: 'SupOr#EUW', championName: 'Thresh', team: 'ORDER', isDead: false, scores: { kills: 0, deaths: 5, assists: 14, creepScore: 32 } },
+    { riotId: 'TopCh#EUW', championName: 'Darius', team: 'CHAOS', isDead: false, scores: { kills: 6, deaths: 2, assists: 2, creepScore: 155 } },
+    { riotId: 'JglCh#EUW', championName: 'Kha\'Zix', team: 'CHAOS', isDead: false, scores: { kills: 3, deaths: 4, assists: 4, creepScore: 121 } },
+    { riotId: 'MidCh#EUW', championName: 'Zed', team: 'CHAOS', isDead: true, scores: { kills: 4, deaths: 5, assists: 1, creepScore: 168 } },
+    { riotId: 'AdcCh#EUW', championName: 'Caitlyn', team: 'CHAOS', isDead: false, scores: { kills: 2, deaths: 3, assists: 5, creepScore: 195 } },
+    { riotId: 'SupCh#EUW', championName: 'Lulu', team: 'CHAOS', isDead: false, scores: { kills: 0, deaths: 4, assists: 9, creepScore: 25 } }
+  ],
+  events: { Events: [
+    { EventName: 'FirstBlood', EventTime: 191, KillerName: 'Hugo#EUW' },
+    { EventName: 'DragonKill', EventTime: 512, DragonType: 'Ocean', KillerName: 'JglOr#EUW' },
+    { EventName: 'TurretKilled', EventTime: 743, KillerName: 'Hugo#EUW' },
+    { EventName: 'DragonKill', EventTime: 903, DragonType: 'Infernal', KillerName: 'JglCh#EUW' },
+    { EventName: 'BaronKill', EventTime: 1102, KillerName: 'JglOr#EUW' }
+  ] }
+};
+
+poll();
+if (!mock) setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

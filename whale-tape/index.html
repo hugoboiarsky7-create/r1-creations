@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1.0, user-scalable=no">
+<title>Whale Tape</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  width: 240px; height: 282px; overflow: hidden;
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  user-select: none; -webkit-user-select: none;
+}
+#app { width: 240px; height: 282px; display: flex; flex-direction: column; }
+
+#hdr { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 7px 10px 4px 10px; }
+#dot { width: 7px; height: 7px; border-radius: 50%; background: #f87171; }
+#dot.on { background: #4ade80; }
+#coin { font-size: 15px; font-weight: 800; color: #38BDF8; }
+#thr { margin-left: auto; font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.6); padding: 2px 7px; border-radius: 9px; background: rgba(255,255,255,0.08); }
+
+#tape { flex: 1 1 auto; overflow: hidden; }
+.tr {
+  height: 24px; display: flex; align-items: center; gap: 6px;
+  padding: 0 10px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.tr .tm { color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 600; }
+.tr .sz { flex: 1; text-align: right; font-weight: 800; }
+.tr .px { color: rgba(255,255,255,0.55); font-size: 11px; }
+.tr.b .sz { color: #4ade80; }
+.tr.a .sz { color: #f87171; }
+.tr.mega { background: rgba(250,204,21,0.07); }
+.empty { padding: 40px 20px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.35); line-height: 1.7; }
+
+#hint {
+  flex: 0 0 auto; font-size: 9px; color: rgba(255,255,255,0.3); text-align: center;
+  padding: 3px 6px 5px 6px; border-top: 1px solid rgba(255,255,255,0.08);
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hdr">
+    <div id="dot"></div>
+    <span id="coin">BTC</span>
+    <span id="thr">≥ 500 k$</span>
+  </div>
+  <div id="tape"><div class="empty">En attente de gros trades…</div></div>
+  <div id="hint">molette = coin · tap ou clic latéral = seuil (500k / 1M / 5M)</div>
+</div>
+
+<script>
+'use strict';
+var WS_URL = 'wss://api.hyperliquid.xyz/ws';
+var COINS = ['BTC', 'ETH', 'SOL', 'HYPE', 'XRP', 'DOGE', 'FARTCOIN', 'PUMP', 'WLFI', 'LINK'];
+var THRESHOLDS = [500000, 1000000, 5000000];
+var LSK = 'wt_cfg';
+
+function load(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+var cfg = load(LSK, { ci: 0, ti: 0 });
+var rows = [];            // {t, side, notional, px}
+var ws = null, wsCoin = null, reconnT = null, backoff = 1000, alive = false;
+
+var $ = function(id) { return document.getElementById(id); };
+
+function fmtUsd(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(2).replace('.', ',') + ' M$';
+  return Math.round(n / 1000) + ' k$';
+}
+function fmtPx(x) {
+  var dec = x >= 1000 ? 1 : x >= 10 ? 2 : x >= 0.1 ? 4 : 6;
+  var s = x.toFixed(dec).split('.');
+  s[0] = s[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return s.join(',');
+}
+function fmtTime(t) {
+  var d = new Date(t);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+}
+function thrLabel() { var t = THRESHOLDS[cfg.ti]; return '≥ ' + (t >= 1e6 ? (t / 1e6) + ' M$' : (t / 1000) + ' k$'); }
+
+/* ---------------- WebSocket + reconnexion ---------------- */
+function connect() {
+  clearTimeout(reconnT);
+  if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} }
+  alive = false; render();
+  ws = new WebSocket(WS_URL);
+  ws.onopen = function() {
+    alive = true; backoff = 1000;
+    wsCoin = COINS[cfg.ci];
+    ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'trades', coin: wsCoin } }));
+    render();
+  };
+  ws.onmessage = function(ev) {
+    var m;
+    try { m = JSON.parse(ev.data); } catch (e) { return; }
+    if (m.channel !== 'trades' || !Array.isArray(m.data)) return;
+    var thr = THRESHOLDS[cfg.ti];
+    var added = false;
+    m.data.forEach(function(t) {
+      if (t.coin !== COINS[cfg.ci]) return;
+      var px = parseFloat(t.px), sz = parseFloat(t.sz);
+      var notional = px * sz;
+      if (notional < thr) return;
+      rows.unshift({ t: t.time, side: t.side, notional: notional, px: px });
+      added = true;
+    });
+    if (added) { rows = rows.slice(0, 60); render(); }
+  };
+  ws.onclose = function() {
+    alive = false; render();
+    reconnT = setTimeout(connect, backoff);
+    backoff = Math.min(15000, backoff * 2);   // backoff exponentiel plafonné
+  };
+  ws.onerror = function() { try { ws.close(); } catch (e) {} };
+}
+
+function switchCoin(dir) {
+  cfg.ci = (cfg.ci + dir + COINS.length) % COINS.length;
+  save(LSK, cfg);
+  rows = [];
+  if (ws && ws.readyState === 1) {
+    if (wsCoin) ws.send(JSON.stringify({ method: 'unsubscribe', subscription: { type: 'trades', coin: wsCoin } }));
+    wsCoin = COINS[cfg.ci];
+    ws.send(JSON.stringify({ method: 'subscribe', subscription: { type: 'trades', coin: wsCoin } }));
+  }
+  render();
+}
+function cycleThr() {
+  cfg.ti = (cfg.ti + 1) % THRESHOLDS.length;
+  save(LSK, cfg);
+  render();
+}
+
+/* ---------------- rendu ---------------- */
+function render() {
+  $('dot').className = alive ? 'on' : '';
+  $('dot').id = 'dot';
+  $('coin').textContent = COINS[cfg.ci];
+  $('thr').textContent = thrLabel();
+  var tape = $('tape');
+  if (!rows.length) {
+    tape.innerHTML = '<div class="empty">' + (alive ? 'En attente de trades ' + thrLabel() + ' sur ' + COINS[cfg.ci] + '…' : 'Connexion…') + '</div>';
+    return;
+  }
+  var html = '';
+  rows.forEach(function(r) {
+    var mega = r.notional >= THRESHOLDS[cfg.ti] * 4;
+    html += '<div class="tr ' + (r.side === 'B' ? 'b' : 'a') + (mega ? ' mega' : '') + '">' +
+      '<span class="tm">' + fmtTime(r.t) + '</span>' +
+      '<span class="sz">' + (r.side === 'B' ? '▲ ' : '▼ ') + fmtUsd(r.notional) + '</span>' +
+      '<span class="px">@ ' + fmtPx(r.px) + '</span></div>';
+  });
+  tape.innerHTML = html;
+}
+
+/* ---------------- contrôles ---------------- */
+window.addEventListener('scrollUp',   function() { switchCoin(-1); });
+window.addEventListener('scrollDown', function() { switchCoin(1); });
+window.addEventListener('sideClick',  cycleThr);
+$('tape').addEventListener('pointerup', cycleThr);
+$('hdr').addEventListener('pointerup', cycleThr);
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp')   window.dispatchEvent(new Event('scrollUp'));
+  if (e.key === 'ArrowDown') window.dispatchEvent(new Event('scrollDown'));
+  if (e.key === 'Escape')    window.dispatchEvent(new Event('sideClick'));
+});
+
+connect();
+render();
+</script>
+</body>
+</html>
