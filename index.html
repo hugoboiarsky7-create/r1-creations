@@ -51,6 +51,7 @@ html, body {
 .badge.long  { background: rgba(74,222,128,0.18); color: #4ade80; }
 .badge.short { background: rgba(248,113,113,0.18); color: #f87171; }
 #pos-lev { font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.45); }
+.dex-tag { font-size: 10px; font-weight: 800; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.5px; }
 .row { display: flex; justify-content: space-between; align-items: baseline; padding: 2.5px 0; }
 .row .lbl { font-size: 11px; color: rgba(255,255,255,0.45); }
 .row .val { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -74,6 +75,7 @@ html, body {
 }
 .ord-l1 { display: flex; align-items: baseline; gap: 5px; }
 .ord-coin { font-size: 13px; font-weight: 800; }
+.ord-dex { font-size: 9px; font-weight: 800; color: rgba(255,255,255,0.35); text-transform: uppercase; }
 .ord-side { font-size: 10px; font-weight: 800; }
 .ord-type { margin-left: auto; font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.4); letter-spacing: 0.3px; }
 .ord-l2 { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: rgba(255,255,255,0.75); margin-top: 1px; }
@@ -116,6 +118,7 @@ if (qsAddr) ADDRESS = qsAddr;
 
 var state = {
   tab: 'pos',          // 'pos' | 'ord'
+  dexs: null,          // perp dexs : '' = natif (crypto), puis HIP-3 ('xyz' = actions, …)
   positions: [],
   orders: [],
   mids: {},
@@ -164,6 +167,13 @@ function post(body) {
   });
 }
 
+// Coins HIP-3 préfixés par leur dex : "xyz:MU" → { base: 'MU', dex: 'xyz' }
+function coinParts(c) {
+  var i = String(c).indexOf(':');
+  if (i < 0) return { base: c, dex: '' };
+  return { base: String(c).slice(i + 1), dex: String(c).slice(0, i) };
+}
+
 function refresh() {
   if (!/^0x[0-9a-fA-F]{40}$/.test(ADDRESS)) {
     state.badAddr = true;
@@ -171,23 +181,59 @@ function refresh() {
     render();
     return;
   }
-  Promise.all([
-    post({ type: 'clearinghouseState', user: ADDRESS }),
-    post({ type: 'allMids' }),
-    post({ type: 'frontendOpenOrders', user: ADDRESS })
-  ]).then(function(res) {
-    var ch = res[0];
-    state.positions = (ch.assetPositions || []).map(function(ap) { return ap.position; });
-    state.mids = res[1] || {};
-    state.orders = res[2] || [];
-    state.acctValue = parseFloat(ch.marginSummary.accountValue);
-    state.marginUsed = parseFloat(ch.marginSummary.totalMarginUsed);
-    if (state.idx >= state.positions.length) state.idx = Math.max(0, state.positions.length - 1);
-    var maxOff = Math.max(0, state.orders.length - visibleOrderRows());
-    if (state.ordOffset > maxOff) state.ordOffset = maxOff;
-    state.lastOk = Date.now();
-    state.error = null;
-    render();
+  // 1. Liste des perp dexs (natif + HIP-3), récupérée une fois puis mise en cache
+  var pDexs = state.dexs
+    ? Promise.resolve(state.dexs)
+    : post({ type: 'perpDexs' }).then(function(list) {
+        var names = [''];
+        (list || []).forEach(function(d) { if (d && d.name) names.push(d.name); });
+        state.dexs = names;
+        return names;
+      }).catch(function() { return ['']; });
+
+  pDexs.then(function(dexList) {
+    // 2. État du compte sur chaque dex + mids du dex natif
+    var calls = dexList.map(function(dx) {
+      var b = { type: 'clearinghouseState', user: ADDRESS };
+      if (dx) b.dex = dx;
+      return post(b).catch(function() { return null; });
+    });
+    calls.push(post({ type: 'allMids' }).catch(function() { return null; }));
+    return Promise.all(calls).then(function(res) {
+      var mids = res.pop();
+      var positions = [], actifs = [], acct = 0, margin = 0, ok = false;
+      res.forEach(function(ch, i) {
+        if (!ch || !ch.marginSummary) return;
+        ok = true;
+        var av = parseFloat(ch.marginSummary.accountValue) || 0;
+        var mu = parseFloat(ch.marginSummary.totalMarginUsed) || 0;
+        acct += av; margin += mu;
+        var ps = (ch.assetPositions || []).map(function(ap) { return ap.position; });
+        positions = positions.concat(ps);
+        if (av > 0 || mu > 0 || ps.length) actifs.push(dexList[i]);
+      });
+      if (!ok) throw new Error('API');
+      // 3. Ordres ouverts, uniquement sur les dexs où le compte est actif
+      return Promise.all(actifs.map(function(dx) {
+        var b = { type: 'frontendOpenOrders', user: ADDRESS };
+        if (dx) b.dex = dx;
+        return post(b).catch(function() { return []; });
+      })).then(function(ordRes) {
+        var orders = [];
+        ordRes.forEach(function(os) { orders = orders.concat(os || []); });
+        state.positions = positions;
+        state.orders = orders;
+        state.mids = mids || {};
+        state.acctValue = acct;
+        state.marginUsed = margin;
+        if (state.idx >= state.positions.length) state.idx = Math.max(0, state.positions.length - 1);
+        var maxOff = Math.max(0, state.orders.length - visibleOrderRows());
+        if (state.ordOffset > maxOff) state.ordOffset = maxOff;
+        state.lastOk = Date.now();
+        state.error = null;
+        render();
+      });
+    });
   }).catch(function(e) {
     state.error = 'Erreur réseau (' + (e.message || 'fetch') + ')';
     render();
@@ -215,10 +261,15 @@ function renderPosition() {
     return;
   }
   var p = state.positions[state.idx];
+  var cp = coinParts(p.coin);
   var szi = parseFloat(p.szi);
   var isLong = szi > 0;
   var entry = parseFloat(p.entryPx);
   var mid = parseFloat(state.mids[p.coin]);
+  if (!isFinite(mid) && Math.abs(szi) > 0) {
+    var pv = parseFloat(p.positionValue);   // fallback dexs HIP-3 : prix ≈ positionValue / |szi|
+    if (isFinite(pv)) mid = pv / Math.abs(szi);
+  }
   var pnl = parseFloat(p.unrealizedPnl);
   var roe = parseFloat(p.returnOnEquity) * 100;
   var cls = pnl >= 0 ? 'green' : 'red';
@@ -227,11 +278,12 @@ function renderPosition() {
   v.innerHTML =
     '<div id="card">' +
       '<div id="pos-head">' +
-        '<span id="pos-coin">' + esc(p.coin) + '</span>' +
+        '<span id="pos-coin">' + esc(cp.base) + '</span>' +
+        (cp.dex ? '<span class="dex-tag">' + esc(cp.dex) + '</span>' : '') +
         '<span class="badge ' + (isLong ? 'long">LONG' : 'short">SHORT') + '</span>' +
         '<span id="pos-lev">' + p.leverage.value + 'x ' + (p.leverage.type === 'cross' ? 'cross' : 'isol.') + '</span>' +
       '</div>' +
-      '<div class="row"><span class="lbl">Taille</span><span class="val">' + fmtPx(Math.abs(szi)) + ' ' + esc(p.coin) + '</span></div>' +
+      '<div class="row"><span class="lbl">Taille</span><span class="val">' + fmtPx(Math.abs(szi)) + ' ' + esc(cp.base) + '</span></div>' +
       '<div class="row"><span class="lbl">Entrée</span><span class="val">' + fmtPx(entry) + '</span></div>' +
       '<div class="row"><span class="lbl">Prix</span><span class="val">' + (isFinite(mid) ? fmtPx(mid) : '–') + '</span></div>' +
       '<div class="row"><span class="lbl">Liquidation</span><span class="val red">' + (isFinite(liq) ? fmtPx(liq) : '–') + '</span></div>' +
@@ -260,6 +312,7 @@ function renderOrders() {
   var html = '';
   for (var i = 0; i < state.orders.length; i++) {
     var o = state.orders[i];
+    var cp = coinParts(o.coin);
     var buy = o.side === 'B';
     var type = o.isTrigger ? esc(o.orderType).toUpperCase() : 'LIMIT';
     var px = o.isTrigger && parseFloat(o.triggerPx) > 0 ? o.triggerPx : o.limitPx;
@@ -267,7 +320,8 @@ function renderOrders() {
     html +=
       '<div class="ord">' +
         '<div class="ord-l1">' +
-          '<span class="ord-coin">' + esc(o.coin) + '</span>' +
+          '<span class="ord-coin">' + esc(cp.base) + '</span>' +
+          (cp.dex ? '<span class="ord-dex">' + esc(cp.dex) + '</span>' : '') +
           '<span class="ord-side ' + (buy ? 'green">ACHAT' : 'red">VENTE') + '</span>' +
           '<span class="ord-type">' + type + (o.reduceOnly ? ' · RO' : '') + '</span>' +
         '</div>' +
