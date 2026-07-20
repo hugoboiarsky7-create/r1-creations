@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QR d'installation — r1-creations</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0e0e10; color: #fff;
+  font-family: -apple-system, sans-serif;
+  padding: 28px 16px 48px 16px;
+}
+h1 { text-align: center; font-size: 24px; font-weight: 800; margin-bottom: 6px; }
+p.sub { text-align: center; font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 28px; }
+#grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 22px; max-width: 1100px; margin: 0 auto;
+}
+.card {
+  background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.card .name { font-size: 15px; font-weight: 800; }
+.card .qr { background: #fff; padding: 10px; border-radius: 8px; line-height: 0; }
+.card .desc { font-size: 11px; color: rgba(255,255,255,0.45); text-align: center; }
+.card .v { font-size: 10px; color: rgba(255,255,255,0.25); }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: baseline; }
+</style>
+</head>
+<body>
+<h1>🐰 r1-creations</h1>
+<p class="sub">Sur le R1 : create → add via QR code → scanne. Une app à la fois.</p>
+<div id="grid"></div>
+<script src="https://unpkg.com/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
+<script>
+var APPS = [
+  { name: "HL Perps",         url: "https://hugoboiarsky7-create.github.io/r1-creations/?v=3",              desc: "Positions perp Hyperliquid en lecture seule", color: "#4ADE80" },
+  { name: "Blackjack",        url: "https://hugoboiarsky7-create.github.io/r1-creations/blackjack/?v=1",    desc: "Blackjack avec bankroll fictive persistante", color: "#FACC15", qrTitle: "Blackjack Bankroll" },
+  { name: "Tâches",           url: "https://hugoboiarsky7-create.github.io/r1-creations/taches/?v=2",       desc: "Dicte tes taches au bouton PTT",              color: "#FE5000", qrTitle: "Taches" },
+  { name: "Funding Radar",    url: "https://hugoboiarsky7-create.github.io/r1-creations/funding/?v=2",      desc: "Funding Hyperliquid par coin, taux horaire et annuel", color: "#2DD4BF" },
+  { name: "Guess the Chart",  url: "https://hugoboiarsky7-create.github.io/r1-creations/chart-game/?v=2",   desc: "Devine LONG ou SHORT sur un chart mystere",   color: "#A78BFA" },
+  { name: "Score de Padel",   url: "https://hugoboiarsky7-create.github.io/r1-creations/padel/?v=2",        desc: "Compteur de score de padel avec historique",  color: "#60A5FA" },
+  { name: "Market Watch",     url: "https://hugoboiarsky7-create.github.io/r1-creations/market-watch/?v=1", desc: "Alertes de prix Hyperliquid, docked mode",    color: "#F97316" },
+  { name: "Poker vs IA",      url: "https://hugoboiarsky7-create.github.io/r1-creations/poker/?v=1",        desc: "Texas Hold'em contre 3 bots",                 color: "#34D399" },
+  { name: "Whale Tape",       url: "https://hugoboiarsky7-create.github.io/r1-creations/whale-tape/?v=1",   desc: "Gros trades Hyperliquid en temps reel",       color: "#38BDF8" },
+  { name: "Carnet Asie",      url: "https://hugoboiarsky7-create.github.io/r1-creations/carnet-asie/?v=1",  desc: "Compte a rebours et depenses de voyage",      color: "#FB7185" },
+  { name: "Flashcards JP/KR", url: "https://hugoboiarsky7-create.github.io/r1-creations/flashcards/?v=1",   desc: "Kana, hangul et phrases de survie",           color: "#C084FC", qrTitle: "Flashcards JP KR" },
+  { name: "LoL Live HUD",     url: "https://hugoboiarsky7-create.github.io/r1-creations/lol-hud/?v=1",      desc: "Score et KDA en direct via ton Worker",       color: "#FACC15" },
+  { name: "Ciné-Roulette",    url: "https://hugoboiarsky7-create.github.io/r1-creations/cine/?v=1",         desc: "Watchlist et roulette du soir",               color: "#F472B6", qrTitle: "Cine-Roulette" },
+  { name: "Golf",             url: "https://hugoboiarsky7-create.github.io/r1-creations/golf/?v=1",         desc: "Carte de score 9 ou 18 trous",                color: "#4ADE80" },
+  { name: "Blind Test Rap",   url: "https://hugoboiarsky7-create.github.io/r1-creations/blind-test/?v=1",   desc: "Devine le titre en 30 secondes",              color: "#FBBF24" }
+];
+
+var grid = document.getElementById('grid');
+APPS.forEach(function(a) {
+  var card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = '<div class="name"><span class="dot" style="background:' + a.color + '"></span>' + a.name + '</div>' +
+    '<div class="qr"></div><div class="desc">' + a.desc + '</div>' +
+    '<div class="v">' + a.url.split('?')[1] + '</div>';
+  grid.appendChild(card);
+  new QRCodeStyling({
+    width: 210, height: 210, margin: 4,
+    data: JSON.stringify({ title: a.qrTitle || a.name, url: a.url, description: a.desc, iconUrl: "", themeColor: a.color }),
+    qrOptions: { errorCorrectionLevel: "M" },
+    dotsOptions: { color: "#000000", type: "square" },
+    backgroundOptions: { color: "#ffffff" },
+    cornersSquareOptions: { color: "#000000", type: "square" },
+    cornersDotOptions: { color: "#000000" }
+  }).append(card.querySelector('.qr'));
+});
+</script>
+</body>
+</html>
